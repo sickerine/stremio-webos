@@ -1,0 +1,197 @@
+--- video.chunk.js
++++ video.chunk.js
+@@ -18772,6 +18770,35 @@
+                 }, d.canplaythrough = function() {
+                     S("buffering"), S("buffered")
+                 }, d.onloadedmetadata = function() {
++                    if (d.audioTracks && d.audioTracks.length > 0) {
++                        var __prefLang = null;
++                        try { __prefLang = JSON.parse(localStorage.getItem("profile")).settings.audioLanguage; } catch(__e) {}
++                        if (!__prefLang) {
++                            try { __prefLang = (navigator.language || "").substring(0, 2); } catch(__e) {}
++                        }
++                        var __prefIdx = -1;
++                        if (__prefLang) {
++                            for (var __ai = 0; __ai < d.audioTracks.length; __ai++) {
++                                var __tl = d.audioTracks[__ai].language || "";
++                                if (__tl === __prefLang || __tl.substring(0, 2) === __prefLang.substring(0, 2)) {
++                                    __prefIdx = __ai; break;
++                                }
++                            }
++                        }
++                        if (__prefIdx >= 0) {
++                            for (var __aj = 0; __aj < d.audioTracks.length; __aj++) d.audioTracks[__aj].enabled = (__aj === __prefIdx);
++                            try {
++                                if (window.webOS && window.webOS.service && d.mediaId) {
++                                    window.webOS.service.request("luna://com.webos.media", {
++                                        method: "selectTrack",
++                                        parameters: { mediaId: d.mediaId, type: "audio", index: __prefIdx }
++                                    });
++                                }
++                            } catch(__e) {}
++                        }
++                        S("audioTracks");
++                        S("selectedAudioTrackId");
++                    }
+                     S("loaded")
+                 }, d.onloadeddata = function() {
+                     S("buffering"), S("buffered")
+@@ -18858,7 +18885,7 @@
+                         case "subtitlesOpacity":
+                             return g ? null : Math.round(100 * v);
+                         case "audioTracks":
+-                            return null !== h && Array.isArray(h.audioTracks) ? h.audioTracks.map((function(e) {
++                            if (null !== h && Array.isArray(h.audioTracks)) return h.audioTracks.map((function(e) {
+                                 return Object.freeze({
+                                     id: "EMBEDDED_" + String(e.id),
+                                     lang: "string" == typeof e.lang && e.lang.length > 0 ? e.lang : "string" == typeof e.name && e.name.length > 0 ? e.name : String(e.id),
+@@ -18866,9 +18893,32 @@
+                                     origin: "EMBEDDED",
+                                     embedded: !0
+                                 })
+-                            })) : [];
++                            }));
++                            if (d.audioTracks && d.audioTracks.length > 0) {
++                                var __out = [];
++                                for (var __i = 0; __i < d.audioTracks.length; __i++) {
++                                    var __t = d.audioTracks[__i];
++                                    var __lang = __t.language || "";
++                                    var __label = __t.label || (__lang ? __lang : "Track " + (__i + 1));
++                                    __out.push(Object.freeze({
++                                        id: "EMBEDDED_" + String(__i),
++                                        lang: __lang || String(__i),
++                                        label: __label,
++                                        origin: "EMBEDDED",
++                                        embedded: !0
++                                    }));
++                                }
++                                return __out;
++                            }
++                            return [];
+                         case "selectedAudioTrackId":
+-                            return null !== h && null !== h.audioTrack && isFinite(h.audioTrack) && -1 !== h.audioTrack ? "EMBEDDED_" + String(h.audioTrack) : null;
++                            if (null !== h && null !== h.audioTrack && isFinite(h.audioTrack) && -1 !== h.audioTrack) return "EMBEDDED_" + String(h.audioTrack);
++                            if (d.audioTracks && d.audioTracks.length > 0) {
++                                for (var __si = 0; __si < d.audioTracks.length; __si++) {
++                                    if (d.audioTracks[__si].enabled) return "EMBEDDED_" + String(__si);
++                                }
++                            }
++                            return null;
+                         case "volume":
+                             return g || null === d.volume || !isFinite(d.volume) ? null : Math.floor(100 * d.volume);
+                         case "muted":
+@@ -19003,6 +19053,44 @@
+                                                 return e.id === t
+                                             }));
+                                             h.audioTrack = a ? parseInt(a.id.split("_").pop(), 10) : -1, a && (S("selectedAudioTrackId"), f.emit("audioTrackLoaded", a))
++                                        } else if (d.audioTracks && d.audioTracks.length > 0 && typeof t === "string") {
++                                            // Native audio track switching: webOS Chromium accepts
++                                            // audioTracks[i].enabled and the Luna selectTrack call
++                                            // without error, but the system pipeline keeps decoding
++                                            // the original track once playback has started. Pausing,
++                                            // resetting src, and seeking back forces the pipeline to
++                                            // re-evaluate which track to decode.
++                                            var __idx = parseInt(t.split("_").pop(), 10);
++                                            if (__idx >= 0 && __idx < d.audioTracks.length) {
++                                                for (var __k = 0; __k < d.audioTracks.length; __k++) d.audioTracks[__k].enabled = (__k === __idx);
++                                                try {
++                                                    if (window.webOS && window.webOS.service && d.mediaId) {
++                                                        window.webOS.service.request("luna://com.webos.media", {
++                                                            method: "selectTrack",
++                                                            parameters: { mediaId: d.mediaId, type: "audio", index: __idx }
++                                                        });
++                                                    }
++                                                } catch(__e) {}
++                                                try {
++                                                    var __saveTime = d.currentTime;
++                                                    var __wasPaused = d.paused;
++                                                    d.pause();
++                                                    var __src = d.src;
++                                                    d.removeAttribute("src");
++                                                    d.load();
++                                                    d.src = __src;
++                                                    d.addEventListener("loadedmetadata", function __onceMd() {
++                                                        d.removeEventListener("loadedmetadata", __onceMd);
++                                                        try {
++                                                            for (var __kk = 0; __kk < d.audioTracks.length; __kk++) d.audioTracks[__kk].enabled = (__kk === __idx);
++                                                            d.currentTime = __saveTime;
++                                                            if (!__wasPaused) d.play();
++                                                        } catch(__e2) {}
++                                                    });
++                                                } catch(__e) {}
++                                                S("audioTracks"); S("selectedAudioTrackId");
++                                                f.emit("audioTrackLoaded", T("audioTracks").find((function(e) { return e.id === t })));
++                                            }
+                                         }
+                                         break;
+                                     case "volume":
+@@ -21049,7 +21049,68 @@
+                     G("buffering"), G("buffered")
+                 }, A.onloadeddata = function() {
+                     G("buffering"), G("buffered")
+-                }, A.onloadedmetadata = function() {
++                }, A.audioTracks && A.audioTracks.addEventListener && A.audioTracks.addEventListener("addtrack", function() {
++                setTimeout(function() {
++                    if (A.audioTracks && A.audioTracks.length > 0) {
++                        T = [];
++                        Array.from(A.audioTracks).forEach(function(e, t) {
++                            T.push({
++                                id: "EMBEDDED_" + t,
++                                lang: e.language || "und",
++                                label: e.label || null,
++                                origin: "EMBEDDED",
++                                embedded: !0,
++                                mode: e.enabled ? "showing" : "disabled"
++                            });
++                            if (e.enabled) v = "EMBEDDED_" + t;
++                        });
++                        // Enrich labels from streaming server /tracks/ data when the native
++                        // audioTrack.label is empty (e.g. MKVs without TITLE metadata).
++                        // Native label wins when present so we don't downgrade rich titles
++                        // ("English (Director's Commentary)") to bare language codes.
++                        if (D && D.url) {
++                            o(D.url, function(trackData) {
++                                if (trackData && trackData.audio && trackData.audio.length) {
++                                    T.forEach(function(track, i) {
++                                        for (var j = 0; j < trackData.audio.length; j++) {
++                                            var td = trackData.audio[j];
++                                            if ((td.lang === track.lang || (td.lang && track.lang && td.lang.substring(0,2) === track.lang.substring(0,2))) && td.label) {
++                                                if (!track.label) track.label = td.label;
++                                                trackData.audio.splice(j, 1);
++                                                break;
++                                            }
++                                        }
++                                    });
++                                    G("audioTracks");
++                                }
++                            });
++                        }
++                        // Auto-select preferred audio language from Stremio settings
++                        var prefLang = null;
++                        try { prefLang = JSON.parse(localStorage.getItem("profile")).settings.audioLanguage; } catch(e) {}
++                        var prefIdx = -1;
++                        if (prefLang) {
++                            for (var ai = 0; ai < A.audioTracks.length; ai++) {
++                                var tl = A.audioTracks[ai].language || "";
++                                if (tl === prefLang || tl.substring(0,2) === prefLang.substring(0,2)) {
++                                    prefIdx = ai; break;
++                                }
++                            }
++                        }
++                        if (prefIdx >= 0) {
++                            for (var aj = 0; aj < A.audioTracks.length; aj++) A.audioTracks[aj].enabled = (aj === prefIdx);
++                            v = "EMBEDDED_" + prefIdx;
++                            T.forEach(function(track, i) { track.mode = i === prefIdx ? "showing" : "disabled"; });
++                            if (A.mediaId) l({ method: "selectTrack", parameters: { type: "audio", mediaId: A.mediaId, index: prefIdx }});
++                        } else if (!v && T.length) {
++                            v = "EMBEDDED_0";
++                        }
++                        G("audioTracks");
++                        G("selectedAudioTrackId");
++                    }
++                }, 100);
++            });
++            A.onloadedmetadata = function() {
+                     G("buffering"), G("buffered"), V("time", C)
+                 }, A.onvolumechange = function() {
+                     G("volume"), G("muted")

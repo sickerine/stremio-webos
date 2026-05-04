@@ -1,0 +1,20 @@
+--- video.chunk.js
++++ video.chunk.js
+@@ -403,6 +403,6 @@
+                                     return (p ? (window.__FORCE_TRANSCODE__ = !1, Promise.resolve(!1)) : t.canPlayStream({
+                                         url: r
+                                     }, f)).catch((function(e) {
+-                                        return console.warn("Media probe error", e), !1
++                                        return console.warn("Media probe error, falling back to direct playback", e), !0
+                                     })).then((function(e) {
+                                         if (e) return {
+--- 1477.chunk.js
++++ 1477.chunk.js
+@@ -16268,6 +16268,6 @@
+                                     return (n.forceTranscoding ? Promise.resolve(!1) : t.canPlayStream({
+                                         url: r
+                                     }, f)).catch((function(e) {
+-                                        return console.warn("Media probe error", e), !1
++                                        return console.warn("Media probe error, falling back to direct playback", e), !0
+                                     })).then((function(e) {
+                                         if (e) return {

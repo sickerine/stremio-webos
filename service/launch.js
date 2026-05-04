@@ -27,20 +27,25 @@ service.register('start', function(message) {
 var wwwDir = path.join(__dirname, 'www');
 var mimeTypes = {
     '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
-    '.ttf': 'font/ttf', '.svg': 'image/svg+xml', '.wasm': 'application/wasm',
-    '.json': 'application/json'
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.ico': 'image/x-icon', '.gif': 'image/gif', '.webp': 'image/webp',
+    '.ttf': 'font/ttf', '.woff': 'font/woff', '.woff2': 'font/woff2',
+    '.svg': 'image/svg+xml', '.wasm': 'application/wasm', '.json': 'application/json',
+    '.map': 'application/json', '.txt': 'text/plain', '.mp3': 'audio/mpeg'
 };
 
 function serveStatic(urlPath, res, next) {
+    // Reject path traversal
     var filePath = path.join(wwwDir, urlPath === '/' ? 'index.html' : urlPath);
-    var ext = path.extname(filePath);
-    if (!ext || !mimeTypes[ext]) return next();
+    if (filePath.indexOf(wwwDir) !== 0) return next();
 
-    fs.readFile(filePath, function(err, data) {
-        if (err) return next();
-        res.writeHead(200, { 'Content-Type': mimeTypes[ext] });
-        res.end(data);
+    fs.stat(filePath, function(err, stat) {
+        if (err || !stat.isFile()) return next();
+        var ext = path.extname(filePath).toLowerCase();
+        res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
+        var stream = fs.createReadStream(filePath);
+        stream.on('error', function() { try { res.end(); } catch (_) {} });
+        stream.pipe(res);
     });
 }
 
@@ -65,5 +70,10 @@ http.createServer(function(req, res) {
     pendingMessages = [];
 });
 
-// Start the streaming server
+// Point the streaming server at the bundled ffmpeg binaries.
+// HLS remux/transcode requires ffmpeg+ffprobe; without these the streaming
+// server's /hlsv2/* endpoints return 500 "no ffmpeg found".
+process.env.FFMPEG_BIN = path.join(__dirname, 'bin', 'ffmpeg');
+process.env.FFPROBE_BIN = path.join(__dirname, 'bin', 'ffprobe');
+
 require('./server.js');
