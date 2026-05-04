@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Stremio</title>
     <script>window.__STREMIO_SERVER_URL__ = 'http://127.0.0.1:8080';</script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(rs) {
+                rs.forEach(function(r) { r.unregister(); });
+            }).catch(function(){});
+        }
+    </script>
     <script defer src="runtime.js"></script>
     <script defer src="main.js"></script>
     <script defer src="service.js"></script>

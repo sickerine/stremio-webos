@@ -1,3 +1,4 @@
 *.ipk
 service/server.js
 service/www/
+service/bin/
