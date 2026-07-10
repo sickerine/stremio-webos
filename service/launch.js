@@ -7,7 +7,7 @@ var fs = require('fs');
 var path = require('path');
 var Service = require('webos-service');
 
-var service = new Service('io.strem.tv.server');
+var service = new Service('io.stremio.patched.server');
 var ready = false;
 var pendingMessages = [];
 
@@ -59,11 +59,44 @@ function proxyToStreaming(req, res) {
     req.pipe(proxy);
 }
 
+// A leftover Service Worker (Vidaa 'stremio-vidaa-v10') can get stuck
+// controlling the page and serve stale cached chunks, masking every update.
+// Serve a self-destructing SW at /sw.js: the browser re-fetches this script
+// on each navigation (bypassing the SW), and on activate it purges all
+// caches, unregisters itself, and reloads every client to fresh assets.
+var SELF_DESTRUCT_SW = [
+    "self.addEventListener('install', function(){ self.skipWaiting(); });",
+    "self.addEventListener('activate', function(e){",
+    "  e.waitUntil(",
+    "    caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); })",
+    "    .then(function(){ return self.registration.unregister(); })",
+    "    .then(function(){ return self.clients.matchAll({ type: 'window' }); })",
+    "    .then(function(cs){ cs.forEach(function(c){ try { c.navigate(c.url); } catch (_) {} }); })",
+    "  );",
+    "});"
+].join("\n");
+
 // Single server: static files first, then proxy to streaming server
 http.createServer(function(req, res) {
     var urlPath = req.url.split('?')[0];
+    if (urlPath === '/sw.js') {
+        res.writeHead(200, {
+            'Content-Type': 'application/javascript',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+        });
+        res.end(SELF_DESTRUCT_SW);
+        return;
+    }
+    if (urlPath === '/' || urlPath === '/index.html') {
+        var idx = path.join(wwwDir, 'index.html');
+        return fs.readFile(idx, function(err, buf) {
+            if (err) return proxyToStreaming(req, res);
+            res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache, no-store, must-revalidate' });
+            res.end(buf);
+        });
+    }
     serveStatic(urlPath, res, function() { proxyToStreaming(req, res); });
-}).listen(8080, function() {
+}).listen(8081, function() {
     ready = true;
     // Respond to any start calls that arrived before the server was ready
     pendingMessages.forEach(function(msg) { msg.respond({ ready: true }); });
@@ -76,4 +109,15 @@ http.createServer(function(req, res) {
 process.env.FFMPEG_BIN = path.join(__dirname, 'bin', 'ffmpeg');
 process.env.FFPROBE_BIN = path.join(__dirname, 'bin', 'ffprobe');
 
-require('./server.js');
+// The Stremio streaming server binds 11470. If another Stremio instance
+// (e.g. the original app) already has it up, reuse it instead of crashing
+// on EADDRINUSE — the proxy above targets 11470 regardless of who started it.
+var net = require('net');
+var probe = new net.Socket();
+var decided = false;
+function startOwn() { if (!decided) { decided = true; require('./server.js'); } }
+probe.setTimeout(1200);
+probe.once('connect', function() { decided = true; probe.destroy(); }); // already running, reuse
+probe.once('timeout', function() { probe.destroy(); startOwn(); });
+probe.once('error', function() { startOwn(); });
+probe.connect(11470, '127.0.0.1');

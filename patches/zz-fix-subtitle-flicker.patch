@@ -1,0 +1,106 @@
+--- video.chunk.js	2026-07-10 22:15:24
++++ video.chunk.js	2026-07-10 22:15:24
+@@ -16291,12 +16291,16 @@
+                         };
+ 
+                     function I() {
+-                        for (; h.hasChildNodes();) h.removeChild(h.lastChild);
+-                        null !== g && null !== f.time && isFinite(f.time) && (h.style.bottom = E + "%", h.style.opacity = L, u.render(g, f.time - T).forEach((function(e) {
+-                            e.style.display = "inline-block", e.style.padding = "0.2em", e.style.whiteSpace = "pre-wrap";
+-                            var t = window.screen720p ? 1.538 : 1;
+-                            e.style.fontSize = Math.floor(b / 25 * t) + "vmin", e.style.color = S, e.style.backgroundColor = A, e.style.textShadow = "-0.15rem -0.15rem 0.15rem " + k + ", 0px -0.15rem 0.15rem " + k + ", 0.15rem -0.15rem 0.15rem " + k + ", -0.15rem 0px 0.15rem " + k + ", 0.15rem 0px 0.15rem " + k + ", -0.15rem 0.15rem 0.15rem " + k + ", 0px 0.15rem 0.15rem " + k + ", 0.15rem 0.15rem 0.15rem " + k, h.appendChild(e), h.appendChild(document.createElement("br"))
+-                        })))
++                        var _t = window.screen720p ? 1.538 : 1,
++                            _c = null !== g && null !== f.time && isFinite(f.time) ? u.render(g, f.time - T) : [],
++                            _html = _c.map((function(e) { return "innerHTML" in e ? e.innerHTML : (e.textContent || "") })).join("<br>"),
++                            _key = _html + "|" + b + "|" + _t + "|" + E + "|" + S + "|" + A + "|" + k + "|" + L;
++                        if (h.__k === _key) return;
++                        h.__k = _key;
++                        var _s = h.__s;
++                        if (!_s) { _s = document.createElement("span"); h.__s = _s; h.appendChild(_s) }
++                        if (!_html) { _s.style.display = "none"; return }
++                        h.style.bottom = E + "%", h.style.opacity = L, _s.style.display = "inline-block", _s.style.padding = "0.2em", _s.style.whiteSpace = "pre-wrap", _s.style.fontSize = Math.floor(b / 25 * _t) + "vmin", _s.style.color = S, _s.style.backgroundColor = A, _s.style.textShadow = "-0.15rem -0.15rem 0.15rem " + k + ", 0px -0.15rem 0.15rem " + k + ", 0.15rem -0.15rem 0.15rem " + k + ", -0.15rem 0px 0.15rem " + k + ", 0.15rem 0px 0.15rem " + k + ", -0.15rem 0.15rem 0.15rem " + k + ", 0px 0.15rem 0.15rem " + k + ", 0.15rem 0.15rem 0.15rem " + k, _s.innerHTML = _html
+                     }
+ 
+                     function w(e, t, r) {
+@@ -19956,20 +19960,16 @@
+                         playbackSpeed: !1
+                     };
+                 async function E() {
+-                    p && S(p.text, "show")
++                    if (p) { var _t = p.text; p = null, S(_t, "show") }
+                 }
+                 async function S(e, n) {
+                     if ("hide" !== n) {
+-                        for (p = {
+-                                text: e
+-                            }; m.hasChildNodes();) m.removeChild(m.lastChild);
+-                        m.style.bottom = r + "%", m.style.opacity = h;
+-                        var i = document.createElement("span");
+-                        i.innerHTML = e, i.style.display = "inline-block", i.style.padding = "0.2em", i.style.fontSize = Math.floor(t / 25) + "vmin", i.style.color = u, i.style.backgroundColor = c, i.style.textShadow = "1px 1px 0.1em " + d, i.style.whiteSpace = "pre-wrap", m.appendChild(i), m.appendChild(document.createElement("br"))
+-                    } else {
+-                        for (; m.hasChildNodes();) m.removeChild(m.lastChild);
+-                        p = null
+-                    }
++                        if (p && p.text === e && m.__s) return;
++                        p = { text: e };
++                        var i = m.__s;
++                        if (!i) { i = document.createElement("span"); m.__s = i; m.appendChild(i) }
++                        m.style.bottom = r + "%", m.style.opacity = h, i.style.display = "inline-block", i.style.padding = "0.2em", i.style.fontSize = Math.floor(t / 25) + "vmin", i.style.color = u, i.style.backgroundColor = c, i.style.textShadow = "1px 1px 0.1em " + d, i.style.whiteSpace = "pre-wrap", i.innerHTML = e
++                    } else m.__s && (m.__s.style.display = "none"), p = null
+                 }
+ 
+                 function A(e) {
+--- 1477.chunk.js	2026-07-10 22:15:24
++++ 1477.chunk.js	2026-07-10 22:15:24
+@@ -212,20 +212,16 @@
+                         playbackSpeed: !1
+                     };
+                 async function E() {
+-                    m && S(m.text, "show")
++                    if (m) { var _t = m.text; m = null, S(_t, "show") }
+                 }
+                 async function S(e, n) {
+                     if ("hide" !== n) {
+-                        for (m = {
+-                                text: e
+-                            }; p.hasChildNodes();) p.removeChild(p.lastChild);
+-                        p.style.bottom = r + "%", p.style.opacity = h;
+-                        var i = document.createElement("span");
+-                        i.innerHTML = e, i.style.display = "inline-block", i.style.padding = "0.2em", i.style.fontSize = Math.floor(t / 25) + "vmin", i.style.color = u, i.style.backgroundColor = c, i.style.textShadow = "1px 1px 0.1em " + d, i.style.whiteSpace = "pre-wrap", p.appendChild(i), p.appendChild(document.createElement("br"))
+-                    } else {
+-                        for (; p.hasChildNodes();) p.removeChild(p.lastChild);
+-                        m = null
+-                    }
++                        if (m && m.text === e && p.__s) return;
++                        m = { text: e };
++                        var i = p.__s;
++                        if (!i) { i = document.createElement("span"); p.__s = i; p.appendChild(i) }
++                        p.style.bottom = r + "%", p.style.opacity = h, i.style.display = "inline-block", i.style.padding = "0.2em", i.style.fontSize = Math.floor(t / 25) + "vmin", i.style.color = u, i.style.backgroundColor = c, i.style.textShadow = "1px 1px 0.1em " + d, i.style.whiteSpace = "pre-wrap", i.innerHTML = e
++                    } else p.__s && (p.__s.style.display = "none"), m = null
+                 }
+ 
+                 function A(e) {
+@@ -787,12 +783,16 @@
+                         };
+ 
+                     function I() {
+-                        for (; h.hasChildNodes();) h.removeChild(h.lastChild);
+-                        null !== g && null !== f.time && isFinite(f.time) && (h.style.bottom = E + "%", h.style.opacity = L, u.render(g, f.time - T).forEach((function(e) {
+-                            e.style.display = "inline-block", e.style.padding = "0.2em", e.style.whiteSpace = "pre-wrap";
+-                            var t = window.screen720p ? 1.538 : 1;
+-                            e.style.fontSize = Math.floor(b / 25 * t) + "vmin", e.style.color = S, e.style.backgroundColor = A, e.style.textShadow = "1px 1px 0.1em " + k, h.appendChild(e), h.appendChild(document.createElement("br"))
+-                        })))
++                        var _t = window.screen720p ? 1.538 : 1,
++                            _c = null !== g && null !== f.time && isFinite(f.time) ? u.render(g, f.time - T) : [],
++                            _html = _c.map((function(e) { return "innerHTML" in e ? e.innerHTML : (e.textContent || "") })).join("<br>"),
++                            _key = _html + "|" + b + "|" + _t + "|" + E + "|" + S + "|" + A + "|" + k + "|" + L;
++                        if (h.__k === _key) return;
++                        h.__k = _key;
++                        var _s = h.__s;
++                        if (!_s) { _s = document.createElement("span"); h.__s = _s; h.appendChild(_s) }
++                        if (!_html) { _s.style.display = "none"; return }
++                        h.style.bottom = E + "%", h.style.opacity = L, _s.style.display = "inline-block", _s.style.padding = "0.2em", _s.style.whiteSpace = "pre-wrap", _s.style.fontSize = Math.floor(b / 25 * _t) + "vmin", _s.style.color = S, _s.style.backgroundColor = A, _s.style.textShadow = "1px 1px 0.1em " + k, _s.innerHTML = _html
+                     }
+ 
+                     function w(e, t, r) {
