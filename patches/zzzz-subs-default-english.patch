@@ -1,6 +1,6 @@
---- player.chunk.js	2026-07-10 23:02:19
-+++ player.chunk.js	2026-07-10 23:02:19
-@@ -1281,7 +1281,7 @@
+--- player.chunk.js	2026-07-10 23:22:01
++++ player.chunk.js	2026-07-10 23:22:01
+@@ -1281,28 +1281,14 @@
                              secondarySubtitlesLanguage: t,
                              audioLanguage: n,
                              secondaryAudioLanguage: r
@@ -9,3 +9,27 @@
                              streamState: o
                          } = T.state(), l = (e, t) => e.find((({
                              lang: e
+                         }) => b.eo.matches(e, t)));
+-                        if (!be())
+-                            if (fe()) {
+-                                if (e) {
+-                                    const t = l($e(), e),
+-                                        n = l(_e(), e);
+-                                    t ? (C.selectSubtitlesTrack(t), me(!0)) : n && (C.selectExtraSubtitlesTrack(n), me(!0))
+-                                }
+-                            } else if (null != o && o.subtitleTrack) {
+-                            const {
+-                                id: e,
+-                                embedded: t
+-                            } = o.subtitleTrack, n = t && e ? e : null, r = !t && e ? e : null;
+-                            n && $e().length ? (C.selectSubtitlesTrack(n), me(!0)) : r && _e().length && (C.selectExtraSubtitlesTrack(r), me(!0))
+-                        } else if (t) {
+-                            const e = l($e(), t),
+-                                n = l(_e(), t);
+-                            e ? (C.selectSubtitlesTrack(e), ve(!0)) : n && (C.selectExtraSubtitlesTrack(n), ve(!0))
++                        if (!be()) {
++                            const __et = l($e(), "eng"), __ea = l(_e(), "eng");
++                            __et ? (C.selectSubtitlesTrack(__et), me(!0)) : __ea && (C.selectExtraSubtitlesTrack(__ea), me(!0))
+                         }
+                         if (!he())
+                             if (null != o && o.audioTrack) {
