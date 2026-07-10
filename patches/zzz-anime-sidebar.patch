@@ -6,9 +6,9 @@
                      label: "STREMIO_TV_NAV_HOME"
 +                }, {
 +                    path: "__ANIME__",
-+                    name: "discover",
-+                    label: "ANIME",
-+                    icon: "calendar-outline"
++                    name: "anime",
++                    label: "Anime",
++                    icon: "tv-outline"
                  }, {
                      path: "/discover",
                      name: "discover",

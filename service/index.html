@@ -12,7 +12,7 @@
             if (document.getElementById('__animeGrid')) return;
             var o = document.createElement('div');
             o.id = '__animeGrid';
-            o.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#0c0b11';
+            o.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;z-index:2147483000;background:#0c0b11';
             var f = document.createElement('iframe');
             f.src = '/anime.html';
             f.setAttribute('scrolling', 'no');
