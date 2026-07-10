@@ -53,7 +53,8 @@ function fetchAniListAiring() {
     // the order reflects what people are actually watching right now rather
     // than all-time popularity (which would put perpetual long-runners first).
     var query = '{ Page(page:1, perPage:50) { media(type:ANIME, status:RELEASING, format_in:[TV, ONA], sort:TRENDING_DESC) ' +
-        '{ idMal title { romaji english } coverImage { large } } } }';
+        '{ idMal title { romaji english } coverImage { extraLarge large } bannerImage description(asHtml:false) ' +
+        'genres averageScore seasonYear episodes } } }';
     var body = JSON.stringify({ query: query });
     return getJson({
         hostname: 'graphql.anilist.co', path: '/', method: 'POST',
@@ -83,12 +84,18 @@ function buildCatalog() {
         return Promise.all(media.map(function (m) {
             return malToKitsu(m.idMal).then(function (kid) {
                 if (!kid) return null;
+                var ci = m.coverImage || {};
                 return {
                     id: 'kitsu:' + kid,
                     type: 'anime',
                     name: (m.title.english || m.title.romaji),
-                    poster: (m.coverImage && m.coverImage.large) || undefined,
-                    posterShape: 'poster'
+                    poster: ci.extraLarge || ci.large || undefined,
+                    posterShape: 'poster',
+                    background: m.bannerImage || ci.extraLarge || undefined,
+                    description: (m.description || '').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').trim() || undefined,
+                    genres: (m.genres && m.genres.length) ? m.genres : undefined,
+                    releaseInfo: m.seasonYear ? String(m.seasonYear) : undefined,
+                    imdbRating: (typeof m.averageScore === 'number') ? (m.averageScore / 10).toFixed(1) : undefined
                 };
             });
         })).then(function (items) { return items.filter(Boolean); });
