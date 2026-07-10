@@ -87,7 +87,7 @@ function buildCatalog() {
                 var ci = m.coverImage || {};
                 return {
                     id: 'kitsu:' + kid,
-                    type: 'anime',
+                    type: 'series',
                     name: (m.title.english || m.title.romaji),
                     poster: ci.extraLarge || ci.large || undefined,
                     posterShape: 'poster',
@@ -122,16 +122,16 @@ var MANIFEST = {
     name: 'AniList Airing',
     description: 'Currently-airing anime from AniList (popularity), mapped to Kitsu ids so streams/subtitles keep working.',
     resources: ['catalog'],
-    types: ['anime'],
+    types: ['series'],
     idPrefixes: ['kitsu:'],
-    catalogs: [{ type: 'anime', id: 'anilist-airing', name: 'AniList Currently Airing' }]
+    catalogs: [{ type: 'series', id: 'anilist-airing', name: 'AniList Currently Airing' }]
 };
 
 // Returns { status, body } for a given addon path, or null if not our route.
 function handle(pathname) {
     if (pathname === '/anime-airing/manifest.json')
         return Promise.resolve({ status: 200, body: JSON.stringify(MANIFEST) });
-    if (pathname === '/anime-airing/catalog/anime/anilist-airing.json')
+    if (pathname === '/anime-airing/catalog/series/anilist-airing.json' || pathname === '/anime-airing/catalog/anime/anilist-airing.json')
         return getMetas().then(function (metas) {
             return { status: 200, body: JSON.stringify({ metas: metas }) };
         });
