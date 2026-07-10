@@ -5,21 +5,29 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Currently Airing</title>
 <style>
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #0c0b11; color: #fff;
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; width: 100%; background: #0c0b11; color: #fff;
     font-family: "Plus Jakarta Sans", system-ui, sans-serif; overflow: hidden; }
-  #hdr { padding: 3vh 4vw 1.5vh; font-size: 3.2vh; font-weight: 700; letter-spacing: .3px; }
+  #hdr { padding: 3vh 4vw 1.5vh; font-size: 3.2vh; font-weight: 700; }
   #hdr small { font-weight: 400; opacity: .5; font-size: 2vh; margin-left: 1vw; }
-  #grid { height: calc(100% - 8vh); overflow-y: auto; padding: 1vh 4vw 6vh;
-    display: grid; grid-template-columns: repeat(6, 1fr); gap: 2.4vh 1.6vw; }
-  .card { position: relative; border-radius: 1vh; overflow: hidden; cursor: pointer;
-    background: #1a1922; outline: none; transition: transform .12s ease; }
-  .card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; }
-  .card .t { position: absolute; left: 0; right: 0; bottom: 0; padding: 3.2vh .6vw .5vh;
-    font-size: 1.55vh; line-height: 1.25; background: linear-gradient(transparent, rgba(0,0,0,.92));
+  #grid { position: absolute; top: 8vh; left: 0; right: 0; bottom: 0;
+    overflow-y: auto; overflow-x: hidden; padding: 1vh 4vw 6vh;
+    display: grid; grid-template-columns: repeat(6, 1fr); grid-gap: 2.6vh 1.6vw; }
+  /* padding-ratio box for 2:3 posters (old-Chromium safe; no aspect-ratio) */
+  .card { position: relative; width: 100%; padding-bottom: 150%; border-radius: 1vh;
+    overflow: hidden; background: #1c1b25; cursor: pointer; }
+  .inner { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+  .inner img { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover; display: block; }
+  .t { position: absolute; left: 0; right: 0; bottom: 0; padding: 4vh .6vw .6vh;
+    font-size: 1.5vh; line-height: 1.25; text-align: center;
+    background: -webkit-linear-gradient(transparent, rgba(0,0,0,.92));
+    background: linear-gradient(transparent, rgba(0,0,0,.92));
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card.focused { transform: scale(1.06); box-shadow: 0 0 0 .4vh #7b5bf5, 0 1vh 3vh rgba(0,0,0,.6); z-index: 2; }
-  #msg { padding: 6vh 4vw; opacity: .6; font-size: 2.2vh; }
+  .card.focused { box-shadow: 0 0 0 .45vh #7b5bf5, 0 1vh 3vh rgba(0,0,0,.7); }
+  .card.focused .inner { -webkit-transform: scale(1.04); transform: scale(1.04); }
+  .inner { -webkit-transition: -webkit-transform .12s ease; transition: transform .12s ease; }
+  #msg { grid-column: 1 / -1; padding: 6vh 0; opacity: .6; font-size: 2.2vh; text-align: center; }
 </style>
 </head>
 <body>
@@ -31,69 +39,63 @@
   var items = [], cards = [], focus = 0, cols = 6;
 
   function go(id) {
-    // Hand off to the native Stremio detail page and close the overlay.
-    try {
-      var top = window.parent && window.parent !== window ? window.parent : window;
-      top.location.hash = '#/detail/anime/' + encodeURIComponent(id);
-      if (top.__closeAnimeGrid) top.__closeAnimeGrid();
-    } catch (e) { location.hash = '#/detail/anime/' + encodeURIComponent(id); }
+    var top = (window.parent && window.parent !== window) ? window.parent : window;
+    try { top.location.hash = '#/detail/anime/' + encodeURIComponent(id); } catch (e) {}
+    try { if (top.__closeAnimeGrid) top.__closeAnimeGrid(); } catch (e) {}
   }
   function close() {
-    var top = window.parent && window.parent !== window ? window.parent : window;
-    if (top.__closeAnimeGrid) top.__closeAnimeGrid();
+    var top = (window.parent && window.parent !== window) ? window.parent : window;
+    try { if (top.__closeAnimeGrid) top.__closeAnimeGrid(); } catch (e) {}
   }
-
   function setFocus(i) {
     if (!cards.length) return;
-    i = Math.max(0, Math.min(cards.length - 1, i));
-    if (cards[focus]) cards[focus].classList.remove('focused');
-    focus = i;
-    cards[focus].classList.add('focused');
-    cards[focus].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (i < 0) i = 0; if (i > cards.length - 1) i = cards.length - 1;
+    if (cards[focus]) cards[focus].className = 'card';
+    focus = i; cards[focus].className = 'card focused';
+    var c = cards[focus], gr = grid;
+    var top = c.offsetTop, bot = top + c.offsetHeight;
+    if (top < gr.scrollTop + 12) gr.scrollTop = top - 12;
+    else if (bot > gr.scrollTop + gr.clientHeight - 12) gr.scrollTop = bot - gr.clientHeight + 12;
   }
-
   function onKey(e) {
     var k = e.keyCode;
-    if (k === 461 || k === 27 || k === 8 || k === 10009) { e.preventDefault(); return close(); } // back/esc
+    if (k === 461 || k === 27 || k === 8 || k === 10009) { e.preventDefault(); return close(); }
     if (k === 37) { e.preventDefault(); setFocus(focus - 1); }
     else if (k === 39) { e.preventDefault(); setFocus(focus + 1); }
     else if (k === 38) { e.preventDefault(); setFocus(focus - cols); }
     else if (k === 40) { e.preventDefault(); setFocus(focus + cols); }
     else if (k === 13) { e.preventDefault(); if (items[focus]) go(items[focus].id); }
   }
-
+  function esc(s) { return String(s || '').replace(/[<>&]/g, function (m) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[m]; }); }
   function render(metas) {
-    items = metas || [];
-    grid.innerHTML = '';
-    cards = [];
-    if (!items.length) { grid.innerHTML = '<div id="msg">No airing anime found (retry in a moment).</div>'; return; }
+    items = metas || []; cards = []; grid.innerHTML = '';
+    if (!items.length) { grid.innerHTML = '<div id="msg">No airing anime found — try again in a moment.</div>'; return; }
     cnt.textContent = items.length + ' shows';
-    cols = Math.max(1, Math.floor(grid.clientWidth / (grid.clientWidth / 6)));
-    items.forEach(function (m, idx) {
-      var c = document.createElement('div');
-      c.className = 'card'; c.tabIndex = 0;
-      var img = m.poster ? '<img src="' + m.poster + '" loading="lazy" onerror="this.style.opacity=.15">' : '<img>';
-      c.innerHTML = img + '<div class="t">' + (m.name || '').replace(/[<>&]/g, '') + '</div>';
-      c.addEventListener('click', function () { go(m.id); });
-      c.addEventListener('mouseenter', function () { setFocus(idx); });
+    for (var i = 0; i < items.length; i++) {
+      var m = items[i];
+      var c = document.createElement('div'); c.className = 'card';
+      var img = m.poster ? '<img src="' + m.poster + '" onerror="this.style.display=\'none\'">' : '';
+      c.innerHTML = '<div class="inner">' + img + '<div class="t">' + esc(m.name) + '</div></div>';
+      (function (id, idx) {
+        c.onclick = function () { go(id); };
+        c.onmouseover = function () { setFocus(idx); };
+      })(m.id, i);
       grid.appendChild(c); cards.push(c);
-    });
-    // derive real column count from layout
+    }
+    // derive real column count from the laid-out grid
     if (cards.length > 1) {
       var y0 = cards[0].offsetTop, n = 1;
       while (n < cards.length && cards[n].offsetTop === y0) n++;
-      cols = n;
+      cols = n || 6;
     }
     setFocus(0);
   }
-
   document.addEventListener('keydown', onKey, true);
-  window.addEventListener('resize', function () { if (items.length) render(items); });
-
+  try { window.focus(); } catch (e) {}
   fetch('/anime-airing/catalog/anime/anilist-airing.json')
     .then(function (r) { return r.json(); })
     .then(function (d) { render(d.metas || []); })
-    .catch(function () { grid.innerHTML = '<div id="msg">Failed to load. Is the internet up?</div>'; });
+    .catch(function () { grid.innerHTML = '<div id="msg">Failed to load (is the internet up?).</div>'; });
 })();
 </script>
 </body>
