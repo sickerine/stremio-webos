@@ -5,7 +5,7 @@
                      name: "home",
                      label: "STREMIO_TV_NAV_HOME"
 +                }, {
-+                    path: "/discover/http%3A%2F%2F127.0.0.1%3A8081%2Fanime-airing%2Fmanifest.json/anime/anilist-airing",
++                    path: "/discover/http%3A%2F%2F127.0.0.1%3A8081%2Fanime-airing%2Fmanifest.json/series/anilist-airing",
 +                    name: "anime",
 +                    label: "Anime",
 +                    icon: "tv-outline",
