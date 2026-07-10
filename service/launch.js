@@ -97,6 +97,13 @@ http.createServer(function(req, res) {
             return;
         }
     }
+    if (urlPath === '/anime.html') {
+        return fs.readFile(path.join(__dirname, 'anime.html'), function(err, buf) {
+            if (err) { res.writeHead(404); return res.end(); }
+            res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache' });
+            res.end(buf);
+        });
+    }
     if (urlPath === '/sw.js') {
         res.writeHead(200, {
             'Content-Type': 'application/javascript',

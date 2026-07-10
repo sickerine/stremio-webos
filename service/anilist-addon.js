@@ -48,9 +48,11 @@ function currentSeason() {
 }
 
 function fetchAniListAiring() {
-    var s = currentSeason();
-    var query = '{ Page(page:1, perPage:40) { media(season:' + s.season +
-        ', seasonYear:' + s.year + ', type:ANIME, status:RELEASING, sort:POPULARITY_DESC) ' +
+    // All currently-releasing anime (current season AND leftovers still airing
+    // from previous seasons), ranked by TRENDING (time-decayed activity) so
+    // the order reflects what people are actually watching right now rather
+    // than all-time popularity (which would put perpetual long-runners first).
+    var query = '{ Page(page:1, perPage:50) { media(type:ANIME, status:RELEASING, format_in:[TV, ONA], sort:TRENDING_DESC) ' +
         '{ idMal title { romaji english } coverImage { large } } } }';
     var body = JSON.stringify({ query: query });
     return getJson({
