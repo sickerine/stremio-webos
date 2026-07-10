@@ -1,22 +1,15 @@
---- main.js	2026-07-11 00:00:23
-+++ main.js	2026-07-11 00:00:23
-@@ -2307,6 +2307,11 @@
+--- main.js	2026-07-11 00:29:14
++++ main.js	2026-07-11 00:29:14
+@@ -2307,6 +2307,12 @@
                      path: "/home",
                      name: "home",
                      label: "STREMIO_TV_NAV_HOME"
 +                }, {
-+                    path: "__ANIME__",
++                    path: "/discover/http%3A%2F%2F127.0.0.1%3A8081%2Fanime-airing%2Fmanifest.json/anime/anilist-airing",
 +                    name: "anime",
 +                    label: "Anime",
-+                    icon: "tv-outline"
++                    icon: "tv-outline",
++                    isFocused: e => "anilist-airing" === e.id
                  }, {
                      path: "/discover",
                      name: "discover",
-@@ -2361,6 +2366,7 @@
-                         [d, h, f] = (0, L.zD)(),
-                         [v, , , p] = (0, L.zD)(),
-                         m = t => {
-+                            if ("__ANIME__" === t) return void (window.__openAnimeGrid && window.__openAnimeGrid());
-                             null === t ? p() : e.navigate(t, !0)
-                         },
-                         g = () => {
