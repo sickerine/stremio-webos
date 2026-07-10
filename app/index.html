@@ -9,9 +9,9 @@ var bridge = new PalmServiceBridge();
 bridge.onservicecallback = function(response) {
     done = true;
     var data = JSON.parse(response);
-    if (data.ready) location.href = 'http://127.0.0.1:8080/';
+    if (data.ready) location.href = 'http://127.0.0.1:8081/';
 };
-bridge.call('luna://io.strem.tv.server/start', '{}');
+bridge.call('luna://io.stremio.patched.server/start', '{}');
 setTimeout(function() {
     if (done) return;
     document.body.innerHTML =
