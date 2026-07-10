@@ -9,7 +9,7 @@
 -                        if (!__prefLang) {
 -                            try { __prefLang = (navigator.language || "").substring(0, 2); } catch(__e) {}
 -                        }
-+                        var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || __id.indexOf("kitsu:") === 0) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
++                        var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || /^(kitsu|mal|anilist|anidb):/i.test(__id)) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
 +                        var __wantJa = __set.indexOf("ja") >= 0;
                          var __prefIdx = -1;
 -                        if (__prefLang) {
@@ -31,7 +31,7 @@
                          // Auto-select preferred audio language from Stremio settings
 -                        var prefLang = null;
 -                        try { prefLang = JSON.parse(localStorage.getItem("profile")).settings.audioLanguage; } catch(e) {}
-+                        var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || __id.indexOf("kitsu:") === 0) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
++                        var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || /^(kitsu|mal|anilist|anidb):/i.test(__id)) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
 +                        var __wantJa = __set.indexOf("ja") >= 0;
                          var prefIdx = -1;
 -                        if (prefLang) {
