@@ -6,6 +6,7 @@ var http = require('http');
 var fs = require('fs');
 var path = require('path');
 var Service = require('webos-service');
+var anilistAddon = require('./anilist-addon.js');
 
 var service = new Service('io.stremio.patched.server');
 var ready = false;
@@ -79,6 +80,23 @@ var SELF_DESTRUCT_SW = [
 // Single server: static files first, then proxy to streaming server
 http.createServer(function(req, res) {
     var urlPath = req.url.split('?')[0];
+    // In-process AniList "currently airing" catalog addon (served to Stremio
+    // as http://127.0.0.1:8081/anime-airing/...). CORS + JSON per addon spec.
+    if (urlPath.indexOf('/anime-airing/') === 0) {
+        var pr = anilistAddon.handle(urlPath);
+        if (pr) {
+            pr.then(function(r) {
+                res.writeHead(r.status, {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': '*',
+                    'Cache-Control': 'no-cache'
+                });
+                res.end(r.body);
+            }).catch(function() { res.writeHead(500); res.end('{}'); });
+            return;
+        }
+    }
     if (urlPath === '/sw.js') {
         res.writeHead(200, {
             'Content-Type': 'application/javascript',
