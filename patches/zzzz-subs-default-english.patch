@@ -1,0 +1,11 @@
+--- player.chunk.js	2026-07-10 23:02:19
++++ player.chunk.js	2026-07-10 23:02:19
+@@ -1281,7 +1281,7 @@
+                             secondarySubtitlesLanguage: t,
+                             audioLanguage: n,
+                             secondaryAudioLanguage: r
+-                        } = w.settings(), {
++                        } = (function(){var __s=w.settings();return __s.subtitlesLanguage?__s:Object.assign({},__s,{subtitlesLanguage:"eng"})})(), {
+                             streamState: o
+                         } = T.state(), l = (e, t) => e.find((({
+                             lang: e
