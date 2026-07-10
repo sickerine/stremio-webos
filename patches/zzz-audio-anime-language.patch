@@ -1,0 +1,49 @@
+--- video.chunk.js	2026-07-10 22:37:52
++++ video.chunk.js	2026-07-10 22:37:52
+@@ -18777,19 +18777,12 @@
+                     S("buffering"), S("buffered")
+                 }, d.onloadedmetadata = function() {
+                     if (d.audioTracks && d.audioTracks.length > 0) {
+-                        var __prefLang = null;
+-                        try { __prefLang = JSON.parse(localStorage.getItem("profile")).settings.audioLanguage; } catch(__e) {}
+-                        if (!__prefLang) {
+-                            try { __prefLang = (navigator.language || "").substring(0, 2); } catch(__e) {}
+-                        }
++                        var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || __id.indexOf("kitsu:") === 0) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
++                        var __wantJa = __set.indexOf("ja") >= 0;
+                         var __prefIdx = -1;
+-                        if (__prefLang) {
+-                            for (var __ai = 0; __ai < d.audioTracks.length; __ai++) {
+-                                var __tl = d.audioTracks[__ai].language || "";
+-                                if (__tl === __prefLang || __tl.substring(0, 2) === __prefLang.substring(0, 2)) {
+-                                    __prefIdx = __ai; break;
+-                                }
+-                            }
++                        for (var __ai = 0; __ai < d.audioTracks.length; __ai++) {
++                            var __tl = (d.audioTracks[__ai].language || "").toLowerCase(), __lb = (d.audioTracks[__ai].label || "").toLowerCase();
++                            if (__set.indexOf(__tl) >= 0 || __set.indexOf(__tl.substring(0, 2)) >= 0 || (__wantJa ? __lb.indexOf("japan") >= 0 : __lb.indexOf("english") >= 0)) { __prefIdx = __ai; break; }
+                         }
+                         if (__prefIdx >= 0) {
+                             for (var __aj = 0; __aj < d.audioTracks.length; __aj++) d.audioTracks[__aj].enabled = (__aj === __prefIdx);
+@@ -21177,16 +21170,12 @@
+                             });
+                         }
+                         // Auto-select preferred audio language from Stremio settings
+-                        var prefLang = null;
+-                        try { prefLang = JSON.parse(localStorage.getItem("profile")).settings.audioLanguage; } catch(e) {}
++                        var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || __id.indexOf("kitsu:") === 0) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
++                        var __wantJa = __set.indexOf("ja") >= 0;
+                         var prefIdx = -1;
+-                        if (prefLang) {
+-                            for (var ai = 0; ai < A.audioTracks.length; ai++) {
+-                                var tl = A.audioTracks[ai].language || "";
+-                                if (tl === prefLang || tl.substring(0,2) === prefLang.substring(0,2)) {
+-                                    prefIdx = ai; break;
+-                                }
+-                            }
++                        for (var ai = 0; ai < A.audioTracks.length; ai++) {
++                            var tl = (A.audioTracks[ai].language || "").toLowerCase(), lb = (A.audioTracks[ai].label || "").toLowerCase();
++                            if (__set.indexOf(tl) >= 0 || __set.indexOf(tl.substring(0, 2)) >= 0 || (__wantJa ? lb.indexOf("japan") >= 0 : lb.indexOf("english") >= 0)) { prefIdx = ai; break; }
+                         }
+                         if (prefIdx >= 0) {
+                             for (var aj = 0; aj < A.audioTracks.length; aj++) A.audioTracks[aj].enabled = (aj === prefIdx);

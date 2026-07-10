@@ -1,6 +1,6 @@
 {
   "id": "io.stremio.patched",
-  "version": "2.0.1",
+  "version": "2.1.1",
   "vendor": "Smart Code OOD",
   "type": "web",
   "main": "index.html",
