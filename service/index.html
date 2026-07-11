@@ -63,38 +63,27 @@
                 for (var j = 0; j < INLINE.length; j++) if (tl.indexOf(INLINE[j]) >= 0) return true;
                 return false;
             }
-            // Library membership for poster indicators: the wasm core bridges
-            // its storage to this page's localStorage; library items carry
-            // _id + removed. Cached Set, rebuilt at most every 15s.
-            var __libCache = { at: 0, set: null };
-            window.__inLibrary = function (id) {
-                var now = Date.now();
-                if (!__libCache.set || now - __libCache.at > 15000) {
-                    var s = new Set();
-                    try {
-                        for (var i = 0; i < localStorage.length; i++) {
-                            var k = localStorage.key(i);
-                            if (!/library/i.test(k)) continue;
-                            try {
-                                var v = JSON.parse(localStorage.getItem(k));
-                                var arr = Array.isArray(v) ? v : (v && typeof v === 'object' ? Object.keys(v).map(function (x) { return v[x]; }) : []);
-                                arr.forEach(function (it) { if (it && it._id && !it.removed) s.add(it._id); });
-                            } catch (e) {}
-                        }
-                    } catch (e) {}
-                    __libCache = { at: now, set: s };
-                }
-                return __libCache.set.has(id);
+            // Library membership for poster indicators. The library lives in
+            // the ACCOUNT; the worker fetch interceptor tees the app's own
+            // datastore sync into /library-cache, which we poll here.
+            var __libSet = new Set();
+            function __libPoll() {
+                fetch('/library-cache').then(function (r) { return r.json(); }).then(function (d) {
+                    __libSet = new Set((d && d.ids) || []);
+                }).catch(function () {});
+            }
+            __libPoll();
+            setInterval(__libPoll, 10000);
+            window.__inLibrary = function (id) { return __libSet.has(id); };
+            // Instant local update when the app adds/removes on THIS device (the
+            // 10s poll only catches other devices / the initial pull). Also
+            // persists the change to the service cache so other pages/restarts
+            // stay consistent until the next full pull.
+            window.__libMark = function (id, inLib) {
+                if (!id) return;
+                if (inLib) __libSet.add(id); else __libSet.delete(id);
+                try { fetch('/library-cache', { method: 'POST', body: JSON.stringify({ upsert: [{ id: id, removed: !inLib }] }) }).catch(function () {}); } catch (e) {}
             };
-            window.__apLog = function (m) {
-                try { fetch('/client-log', { method: 'POST', body: String(m) }); } catch (e) {}
-            };
-            window.addEventListener('error', function (e) {
-                window.__apLog('ERROR ' + (e.message || '') + ' @' + (e.filename || '') + ':' + (e.lineno || ''));
-            });
-            window.addEventListener('unhandledrejection', function (e) {
-                window.__apLog('REJECTION ' + ((e.reason && (e.reason.message || e.reason)) || ''));
-            });
             window.__sortAnimeStreams = function (streams, kindArg) {
                 try {
                     if (!streams || !streams.length) return streams;
@@ -113,7 +102,7 @@
                         return m ? parseInt(m[1], 10) : -1;
                     };
                     return list.slice().sort(function (a, b) { return seed(b) - seed(a); });
-                } catch (e) { window.__apLog('filter EXC ' + (e && e.message)); return streams; }
+                } catch (e) { return streams; }
             };
         })();
     </script>
