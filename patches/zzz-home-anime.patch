@@ -1,6 +1,6 @@
 --- home.chunk.js	2026-07-11 00:29:14
 +++ home.chunk.js	2026-07-11 00:29:14
-@@ -56,6 +56,30 @@
+@@ -56,6 +56,40 @@
                      }, K = async () => {
                          localStorage.setItem("warningModalDismissed", "true"), G(!1)
                      };
@@ -27,20 +27,30 @@
 +                    ((typeof window < "u" && window.__animePreload) || fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json()))).then(aApply).catch((() => {}));
 +                    const aT1 = setInterval((() => { aMetas.length && (new Date).getDay() !== aToday && aBuild() }), 6e4),
 +                        aT2 = setInterval((() => { fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json())).then(aApply).catch((() => {})) }), 18e5);
-+                    (0, r.Ki)((() => { clearInterval(aT1), clearInterval(aT2) }));
++                    // "Next Up" row: last-interacted library shows with the episode
++                    // to continue / watch next (built by the service from account
++                    // library state), sorted by newest aired episode.
++                    const [nuCat, setNuCat] = (0, r.n5)(null);
++                    const nuPull = () => fetch("http://127.0.0.1:8081/library-next").then((e => e.json())).then((e => {
++                        const ms = e && e.metas || [];
++                        setNuCat(ms.length ? { __anime: !0, title: "Next Up", content: ms } : null)
++                    })).catch((() => {}));
++                    nuPull();
++                    const nuT = setInterval(nuPull, 6e4);
++                    (0, r.Ki)((() => { clearInterval(aT1), clearInterval(aT2), clearInterval(nuT) }));
                      return (0, r.EH)((() => {
                          const e = b() - (N() ? 1 : 0);
                          h((() => v.loadCatalogs(e)))
-@@ -101,7 +125,7 @@
+@@ -101,7 +135,7 @@
                                  get children() {
                                      return (0, r.a0)(r.jK, {
                                          get each() {
 -                                            return [N(), ...v.catalogs()].filter((e => null !== e))
-+                                            return [N(), ...aCats()].filter((e => null !== e))
++                                            return [N(), nuCat(), ...aCats()].filter((e => null !== e))
                                          },
                                          children: (e, t) => (0, r.a0)(s.WC, {
                                              get catalog() {
-@@ -114,7 +138,9 @@
+@@ -114,7 +148,9 @@
                                              get autoFocus() {
                                                  return b() === t
                                              },

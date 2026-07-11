@@ -262,6 +262,113 @@ function search(query, page) {
     }).catch(function () { return { metas: [], hasNext: false }; });
 }
 
+// ---- "Next Up" builder for the Home library row -----------------------------
+// Takes full library items (with watch state) and computes, per show: the
+// episode to surface (in-progress with %, or the next unwatched one), plus a
+// sort key = the newest aired episode date ("last episode added").
+var metaCache = {};
+function fetchSeriesMeta(id) {
+    var c = metaCache[id];
+    if (c && (Date.now() - c.at) < 30 * 60 * 1000) return Promise.resolve(c.meta);
+    var opts = /^kitsu:/.test(id)
+        ? { hostname: 'anime-kitsu.strem.fun', path: '/meta/series/' + encodeURIComponent(id) + '.json',
+            method: 'GET', headers: { 'Accept': 'application/json' } }
+        : { hostname: 'v3-cinemeta.strem.io', path: '/meta/series/' + id + '.json',
+            method: 'GET', headers: { 'Accept': 'application/json' } };
+    return getJson(opts).then(function (d) {
+        var m = (d || {}).meta || null;
+        metaCache[id] = { at: Date.now(), meta: m };
+        return m;
+    }).catch(function () { return null; });
+}
+
+function buildNextUp(libItems) {
+    var cands = (libItems || []).filter(function (it) {
+        return it && !it.removed && 'series' === it.type && it.state && it.state.lastWatched;
+    }).sort(function (a, b) {
+        return new Date(b.state.lastWatched) - new Date(a.state.lastWatched);
+    }).slice(0, 20);
+    return Promise.all(cands.map(function (it) {
+        var isKitsu = /^kitsu:/.test(it._id);
+        var schedP = isKitsu ? airingScheduleForKitsu(it._id.split(':')[1]) : Promise.resolve({});
+        return Promise.all([fetchSeriesMeta(it._id), schedP]).then(function (r) {
+            var meta = r[0], sched = r[1] || {};
+            if (!meta || !(meta.videos || []).length) return null;
+            var vids = meta.videos.filter(function (v) {
+                return v && v.id && (void 0 === v.season || v.season > 0); // skip specials
+            });
+            vids.sort(function (a, b) {
+                var ae = a.episode || parseInt(String(a.id).split(':').pop(), 10) || 0;
+                var be = b.episode || parseInt(String(b.id).split(':').pop(), 10) || 0;
+                return (a.season || 0) - (b.season || 0) || ae - be;
+            });
+            // Kitsu premiere-stamps every episode of airing shows with one date;
+            // prefer the AniList schedule for real airdates in that case.
+            var uniq = {};
+            vids.forEach(function (v) { if (v.released) uniq[v.released] = 1; });
+            var stamped = isKitsu && vids.length > 1 && Object.keys(uniq).length <= 1;
+            function relOf(v) {
+                if (isKitsu) {
+                    var ep = parseInt(String(v.id).split(':').pop(), 10);
+                    if (sched[ep]) return sched[ep];
+                    if (stamped) return null;
+                }
+                return v.released || null;
+            }
+            var nowIso = new Date().toISOString();
+            var released = vids.filter(function (v) { var r = relOf(v); return r && r <= nowIso; });
+            if (!released.length) released = vids; // no usable dates -> assume aired
+            var st = it.state, idx = -1;
+            if (st.video_id) for (var i = 0; i < released.length; i++)
+                if (released[i].id === st.video_id) { idx = i; break; }
+            var frac = st.duration > 0 ? st.timeOffset / st.duration : 0;
+            var target, prog = 0;
+            if (idx < 0) {
+                // video_id can point at a not-yet-aired episode (the core
+                // advances past the last finished one) -> caught up, show the
+                // countdown; only genuinely-unwatched shows start at EP 1.
+                var pointsAhead = st.video_id && vids.some(function (v) { return v.id === st.video_id; });
+                target = pointsAhead ? null : released[0];
+            }
+            else if (frac >= 0.95) target = released[idx + 1] || null;
+            else { target = released[idx]; prog = frac > 0.02 ? frac : 0; }
+            var latest = '';
+            released.forEach(function (v) { var r = relOf(v) || v.released || ''; if (r > latest) latest = r; });
+            var out = {
+                id: it._id,
+                type: 'series',
+                name: meta.name || it.name,
+                poster: meta.poster || it.poster || undefined,
+                posterShape: 'poster',
+                background: meta.background || undefined,
+                description: meta.description || undefined,
+                __ours: true,
+                __latest: latest,
+                deepLinks: { metaDetailsVideos: '#/detail/series/' + encodeURIComponent(it._id) +
+                    (target ? '/' + encodeURIComponent(target.id) : '') }
+            };
+            if (target) {
+                var ep = target.episode || parseInt(String(target.id).split(':').pop(), 10);
+                var label = (!isKitsu && null != target.season) ? ('S' + target.season + 'E' + ep) : ('EP ' + ep);
+                out.nextUp = { label: (prog ? label : 'NEXT · ' + label), progress: Math.round(100 * prog) };
+            } else {
+                // fully caught up: surface the next unaired episode's countdown
+                var un = null;
+                for (var j = 0; j < vids.length; j++) { var rr = relOf(vids[j]); if (rr && rr > nowIso) { un = { v: vids[j], r: rr }; break; } }
+                if (un) {
+                    out.airingAt = Math.floor(new Date(un.r).getTime() / 1000);
+                    out.nextEpisode = un.v.episode || parseInt(String(un.v.id).split(':').pop(), 10);
+                } else out.nextUp = { label: 'UP TO DATE', progress: 0 };
+            }
+            return out;
+        });
+    })).then(function (list) {
+        return list.filter(Boolean).sort(function (a, b) {
+            return String(b.__latest || '').localeCompare(String(a.__latest || ''));
+        }).slice(0, 15).map(function (x) { delete x.__latest; return x; });
+    });
+}
+
 var MANIFEST = {
     id: 'io.stremio.patched.anilist',
     version: '1.0.0',
@@ -295,4 +402,4 @@ function handle(pathname) {
     return null;
 }
 
-module.exports = { handle: handle, MANIFEST: MANIFEST, _buildCatalog: buildCatalog, search: search };
+module.exports = { handle: handle, MANIFEST: MANIFEST, _buildCatalog: buildCatalog, search: search, buildNextUp: buildNextUp };

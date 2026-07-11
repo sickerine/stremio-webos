@@ -1,9 +1,20 @@
 --- main.js	2026-07-11 00:29:14
 +++ main.js	2026-07-11 00:29:14
-@@ -1333,6 +1333,21 @@
-                                 }
-                             }), (0, o.a0)(o.wv, {
-                                 get when() {
+@@ -1213,6 +1213,7 @@
+                 return "in " + o.join(" ");
+             }
+             var __apOv = (0, r.vs)("<div class=ap-ov><div class=ap-ov-ep></div><div class=ap-ov-cd></div>");
++            var __apNu = (0, r.vs)("<div class=ap-ov><div class=ap-ov-cd></div><div class=ap-nu-bar><div class=ap-nu-in>");
+             const se = ["movies", "series", "channels", "tv"],
+                 ce = e => {
+                     const {
+@@ -1330,9 +1331,37 @@
+                                         },
+                                         name: "checkmark"
+                                     })), (0, o.gb)((() => (0, r.s7)(e, oe.watched))), e
++                                }
++                            }), (0, o.a0)(o.wv, {
++                                get when() {
 +                                    // In-library indicator on browse cards (addon metas
 +                                    // only — library-backed cards have their own badges).
 +                                    return __apTick[0](), !n() && !a() && e.item && e.item.id && window.__inLibrary && window.__inLibrary(e.item.id)
@@ -16,13 +27,26 @@
 +                                        },
 +                                        name: "library-outline"
 +                                    })), (0, o.gb)((() => (0, r.s7)(t, oe.watched))), t
+                                 }
+                             }), (0, o.a0)(o.wv, {
+                                 get when() {
++                                    return e.item && e.item.nextUp
++                                },
++                                get children() {
++                                    var t = __apNu(), n = t.firstChild, i = n.nextSibling, a = i.firstChild;
++                                    return (0, o.EH)((function () {
++                                        var u = e.item.nextUp || {};
++                                        n.textContent = u.label || "";
++                                        i.style.display = u.progress ? "" : "none";
++                                        a.style.width = (u.progress || 0) + "%"
++                                    })), t
 +                                }
 +                            }), (0, o.a0)(o.wv, {
 +                                get when() {
                                      return e.item && e.item.airingAt
                                  },
                                  get children() {
-@@ -11517,6 +11532,14 @@
+@@ -11517,6 +11546,14 @@
                              var e, n;
                              return null !== (e = null === (n = t()) || void 0 === n ? void 0 : n.user) && void 0 !== e ? e : null
                          }));
@@ -37,7 +61,7 @@
                      return { ...e,
                          isAuthenticated: a,
                          user: s,
-@@ -11531,8 +11554,8 @@
+@@ -11531,8 +11568,8 @@
                          syncAddons: () => e.dispatchAction("PullAddonsFromAPI"),
                          syncLibrary: () => e.dispatchAction("SyncLibraryWithAPI"),
                          syncNotifications: () => e.dispatchAction("PullNotifications"),

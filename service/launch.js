@@ -29,27 +29,34 @@ var wwwDir = path.join(__dirname, 'www');
 var libraryCache = {}; // id -> removed
 var libraryAuthKey = null;
 var libraryPullTimer = null;
+var libraryItems = [];   // full items incl. watch state, for /library-next
+var libraryPulledAt = 0;
 function pullLibrary() {
-    if (!libraryAuthKey) return;
-    var https = require('https');
-    var body = JSON.stringify({ authKey: libraryAuthKey, collection: 'libraryItem', all: true });
-    var req = https.request({
-        hostname: 'api.strem.io', path: '/api/datastoreGet', method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-    }, function (res) {
-        var chunks = '';
-        res.on('data', function (d) { chunks += d; });
-        res.on('end', function () {
-            try {
-                var items = (JSON.parse(chunks).result) || [];
-                libraryCache = {};
-                items.forEach(function (it) { if (it && it._id) libraryCache[it._id] = !!it.removed; });
-            } catch (e) {}
+    if (!libraryAuthKey) return Promise.resolve();
+    return new Promise(function (resolve) {
+        var https = require('https');
+        var body = JSON.stringify({ authKey: libraryAuthKey, collection: 'libraryItem', all: true });
+        var req = https.request({
+            hostname: 'api.strem.io', path: '/api/datastoreGet', method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+        }, function (res) {
+            var chunks = '';
+            res.on('data', function (d) { chunks += d; });
+            res.on('end', function () {
+                try {
+                    var items = (JSON.parse(chunks).result) || [];
+                    libraryItems = items;
+                    libraryPulledAt = Date.now();
+                    libraryCache = {};
+                    items.forEach(function (it) { if (it && it._id) libraryCache[it._id] = !!it.removed; });
+                } catch (e) {}
+                resolve();
+            });
         });
+        req.on('error', function () { resolve(); });
+        req.setTimeout(15000, function () { req.destroy(); resolve(); });
+        req.write(body); req.end();
     });
-    req.on('error', function () {});
-    req.setTimeout(15000, function () { req.destroy(); });
-    req.write(body); req.end();
 }
 function schedulePull(delayMs) {
     clearTimeout(libraryPullTimer);
@@ -181,6 +188,18 @@ http.createServer(function(req, res) {
             }).catch(function() { res.writeHead(500); res.end('{}'); });
             return;
         }
+    }
+    if (urlPath === '/library-next') {
+        // "Next Up" home row: last-interacted library series with the episode
+        // to continue (progress) or watch next, sorted by newest aired episode.
+        var freshP = (Date.now() - libraryPulledAt > 60000) ? pullLibrary() : Promise.resolve();
+        freshP.then(function () {
+            return anilistAddon.buildNextUp(libraryItems);
+        }).then(function (metas) {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+            res.end(JSON.stringify({ metas: metas }));
+        }).catch(function () { res.writeHead(500); res.end('{"metas":[]}'); });
+        return;
     }
     if (urlPath === '/library-cache') {
         // Passive mirror of the account library, fed by the worker fetch
