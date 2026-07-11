@@ -1,11 +1,11 @@
---- details.chunk.js	2026-07-11 01:23:14
-+++ details.chunk.js	2026-07-11 01:23:14
-@@ -352,7 +352,7 @@
-                                     get children() {
-                                         return (0, i.a0)(i.jK, {
-                                             get each() {
--                                                return w()
-+                                                return window.__sortAnimeStreams ? window.__sortAnimeStreams(w()) : w()
-                                             },
-                                             children: (e, n) => (0, i.a0)(V, {
-                                                 get stream() {
+--- details.chunk.js	2026-07-11 01:40:53
++++ details.chunk.js	2026-07-11 01:40:53
+@@ -248,7 +248,7 @@
+                     t: a
+                 } = (0, m.B)(), d = (0, v.Vj)(), {
+                     metaDetails: g
+-                } = (0, o.gK)(), [h, f] = (0, s.ok)(), [p, b] = (0, i.n5)(null !== (n = h().addon) && void 0 !== n ? n : null), [x, y] = (0, i.n5)(parseInt(null !== (t = h().stream) && void 0 !== t ? t : "0")), w = () => {
++                } = (0, o.gK)(), [h, f] = (0, s.ok)(), [p, b] = (0, i.n5)(null !== (n = h().addon) && void 0 !== n ? n : null), [x, y] = (0, i.n5)(parseInt(null !== (t = h().stream) && void 0 !== t ? t : "0")), w = () => (window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0()) : __w0()), __w0 = () => {
+                     var n;
+                     return e.addonsStreams.filter((({
+                         addon: e
