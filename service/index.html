@@ -23,23 +23,61 @@
             box-shadow: 0 .2rem .6rem rgba(0,0,0,.35); }
     </style>
     <script>
-        // For anime (kitsu ids) re-sort streams by seeders (health matters more
-        // than a mislabeled quality tag); everything else keeps Torrentio's
-        // default quality-first order.
-        window.__sortAnimeStreams = function (streams) {
-            try {
-                if (!streams || streams.length < 2) return streams;
+        // For anime (kitsu ids): filter streams by the entry's saved release
+        // kind (all | seasonal | bd), then re-sort by seeders (health matters
+        // more than a mislabeled quality tag). Everything else keeps
+        // Torrentio's default quality-first order.
+        // - BD: BD/BDRip/BDMV/Blu-ray/Remux/JPBD with loose boundaries (BD1080p).
+        // - Seasonal: known simulcast release groups, minus anything BD-marked
+        //   (Judas/EMBER/Anime Time also publish BD batches).
+        // Empty result is honest (e.g. BD on a currently-airing show).
+        (function () {
+            var BD_RE = /(^|[^a-z0-9])(bd(rip|mv)?|blu-?ray|remux|jpbd)([^a-z]|$)/i;
+            var GROUPS = ['subsplease', 'erai-raws', 'erai raws', 'judas', 'asw', 'yameii', 'toonshub', 'dkb', 'anime time', 'horriblesubs', 'ember', 'asakura', 'ironclad', 'feibanyama'];
+            var INLINE = ['varyg', 'tsundere-raws', 'tsundere raws'];
+            function entryId() {
                 var h = '';
                 try { h = decodeURIComponent(location.hash || ''); } catch (e) { h = location.hash || ''; }
-                if (h.indexOf('kitsu:') < 0 && h.indexOf('/detail/anime/') < 0) return streams;
-                var seed = function (s) {
-                    var t = (s && (s.title || s.description || s.name)) || '';
-                    var m = t.match(/👤\s*(\d+)/); // 👤 N
-                    return m ? parseInt(m[1], 10) : -1;
-                };
-                return streams.slice().sort(function (a, b) { return seed(b) - seed(a); });
-            } catch (e) { return streams; }
-        };
+                var m = h.match(/kitsu:\d+/);
+                return m ? m[0] : null;
+            }
+            window.__animeStreamKind = function () {
+                var id = entryId();
+                if (!id) return 'all';
+                try { return localStorage.getItem('animeStreamKind:' + id) || 'all'; } catch (e) { return 'all'; }
+            };
+            window.__setAnimeStreamKind = function (kind) {
+                var id = entryId();
+                if (!id) return;
+                try { localStorage.setItem('animeStreamKind:' + id, kind); } catch (e) {}
+            };
+            function isBD(t) { return BD_RE.test(t); }
+            function isSeasonal(t) {
+                if (isBD(t)) return false;
+                var tl = t.toLowerCase();
+                var m = tl.match(/^\[([^\]]+)\]/);
+                if (m) { var g = m[1]; for (var i = 0; i < GROUPS.length; i++) if (g.indexOf(GROUPS[i]) === 0) return true; }
+                for (var j = 0; j < INLINE.length; j++) if (tl.indexOf(INLINE[j]) >= 0) return true;
+                return false;
+            }
+            window.__sortAnimeStreams = function (streams) {
+                try {
+                    if (!streams || !streams.length) return streams;
+                    var id = entryId();
+                    if (!id) return streams;
+                    var kind = window.__animeStreamKind();
+                    var list = streams;
+                    if ('bd' === kind) list = streams.filter(function (s) { return isBD((s && (s.title || s.name)) || ''); });
+                    else if ('seasonal' === kind) list = streams.filter(function (s) { return isSeasonal((s && (s.title || s.name)) || ''); });
+                    var seed = function (s) {
+                        var t = (s && (s.title || s.description || s.name)) || '';
+                        var m = t.match(/👤\s*(\d+)/); // 👤 N
+                        return m ? parseInt(m[1], 10) : -1;
+                    };
+                    return list.slice().sort(function (a, b) { return seed(b) - seed(a); });
+                } catch (e) { return streams; }
+            };
+        })();
     </script>
     <script>
         if ('serviceWorker' in navigator) {
