@@ -150,6 +150,36 @@ function getMetas() {
     return cache.inflight;
 }
 
+var schedCache = {};
+function airingScheduleForKitsu(kitsuNumericId) {
+    var c = schedCache[kitsuNumericId];
+    if (c && (Date.now() - c.at) < 3600000) return Promise.resolve(c.map);
+    return getJson({
+        hostname: 'relations.yuna.moe',
+        path: '/api/v2/ids?source=kitsu&id=' + kitsuNumericId,
+        method: 'GET', headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
+    }).then(function (d) {
+        var alid = (d || {}).anilist;
+        if (!alid) return {};
+        var body = JSON.stringify({ query: '{ Media(id:' + alid + ') { airingSchedule(perPage:100) { nodes { episode airingAt } } } }' });
+        return getJson({
+            hostname: 'graphql.anilist.co', path: '/', method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
+                'User-Agent': 'Mozilla/5.0', 'Content-Length': Buffer.byteLength(body) }
+        }, body).then(function (r) {
+            var nodes = (((((r || {}).data || {}).Media || {}).airingSchedule || {}).nodes) || [];
+            var map = {};
+            nodes.forEach(function (n) {
+                if (n && n.episode && n.airingAt) map[n.episode] = new Date(n.airingAt * 1000).toISOString();
+            });
+            return map;
+        });
+    }).catch(function () { return {}; }).then(function (map) {
+        schedCache[kitsuNumericId] = { at: Date.now(), map: map };
+        return map;
+    });
+}
+
 var MANIFEST = {
     id: 'io.stremio.patched.anilist',
     version: '1.0.0',
@@ -163,6 +193,11 @@ var MANIFEST = {
 
 // Returns { status, body } for a given addon path, or null if not our route.
 function handle(pathname) {
+    var sm = /^\/anime-airing\/schedule\/(\d+)\.json$/.exec(pathname);
+    if (sm)
+        return airingScheduleForKitsu(sm[1]).then(function (map) {
+            return { status: 200, body: JSON.stringify(map) };
+        });
     if (pathname === '/anime-airing/manifest.json')
         return Promise.resolve({ status: 200, body: JSON.stringify(MANIFEST) });
     if (pathname === '/anime-airing/catalog/series/anilist-airing.json' || pathname === '/anime-airing/catalog/anime/anilist-airing.json')
