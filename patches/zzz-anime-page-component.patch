@@ -10,7 +10,7 @@
              });
              var s = n(9151),
                  r = n(9225),
-@@ -194,8 +195,78 @@
+@@ -194,8 +195,89 @@
                              var e
                          }
                      })
@@ -46,8 +46,11 @@
 +                        // hero panel isn't blank before anything is focused.
 +                        B() || (metas.length && setB(metas[0]));
 +                    };
-+                    const pull = () => fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json())).then((e => { metasRef = e && e.metas || metasRef, build() })).catch((() => {}));
-+                    pull();
++                    const apply = e => { metasRef = e && e.metas || metasRef, build() };
++                    const pull = () => fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json())).then(apply).catch((() => {}));
++                    // First paint uses the app-startup preload if it's ready, so
++                    // opening the tab is instant; otherwise fetch on demand.
++                    ((typeof window < "u" && window.__animePreload) || fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json()))).then(apply).catch((() => {}));
 +                    // Keep it fresh over long sessions: re-bucket at local-midnight
 +                    // rollover, refetch the feed every 30 min.
 +                    const t1 = setInterval((() => { metasRef.length && (new Date).getDay() !== today && build() }), 6e4),
@@ -58,7 +61,13 @@
 +                    return (0, r.a0)(c.YW, {
 +                        get class() { return F.discover },
 +                        get children() {
-+                            return [(0, r.a0)(c.Gn, {
++                            // Until the schedule loads, fill the page with the app's
++                            // own ripple loader (c.Rh) instead of a blank screen.
++                            return (0, r.a0)(r.wv, {
++                                get when() { return cats().length },
++                                get fallback() { return (0, r.a0)(c.Rh, { animations: !0 }) },
++                                get children() {
++                                    return [(0, r.a0)(c.Gn, {
 +                                get item() { return B() }
 +                            }), (0, r.a0)(c.bp, {
 +                                get item() { return B() },
@@ -83,6 +92,8 @@
 +                                    })
 +                                }
 +                            })];
++                                }
++                            });
 +                        }
 +                    })
                  }
