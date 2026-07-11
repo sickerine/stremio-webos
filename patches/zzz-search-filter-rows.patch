@@ -1,0 +1,19 @@
+--- search.chunk.js	2026-07-11 00:29:14
++++ search.chunk.js	2026-07-11 00:29:14
+@@ -239,7 +239,15 @@
+                                                 get children() {
+                                                     return (0, a.a0)(a.jK, {
+                                                         get each() {
+-                                                            return v.state().catalogs
++                                                            // Only show Cinemeta (movies/series) and Anime Kitsu search
++                                                            // rows; hide the redundant AIOMetadata / Public Domain rows.
++                                                            // Addons stay installed (meta/streams unaffected).
++                                                            return v.state().catalogs.filter((function (c) {
++                                                                if (!c) return false;
++                                                                var mid = c.manifest && c.manifest.id;
++                                                                if (mid) return "com.linvo.cinemeta" === mid || "community.anime.kitsu" === mid;
++                                                                return "top" === c.id || "kitsu-anime-list" === c.id;
++                                                            }))
+                                                         },
+                                                         children: (e, n) => (0, a.a0)(l.WC, {
+                                                             get catalog() {
