@@ -22,44 +22,38 @@
 +                        })).catch((() => {})).then((() => { aBusy = !1 }))
 +                    };
 +                    (0, a.EH)((() => { k(); aFetch(!0) }));
-+                    const aNext = () => aFetch(!1), aCat = { title: "Anime", get content() { return aItems() } };
++                    const aNext = () => aFetch(!1), aCat = { __anime: !0, title: "Anime", get content() { return aItems() } };
                      return (0, o.k9)([p, f], (([e, n]) => {
                          y.setCache(U, {
                              row: e,
-@@ -237,9 +256,18 @@
-                                                 },
-                                                 axis: "vertical",
+@@ -239,7 +258,17 @@
                                                  get children() {
--                                                    return (0, a.a0)(a.jK, {
-+                                                    return [(0, a.a0)(a.jK, {
+                                                     return (0, a.a0)(a.jK, {
                                                          get each() {
 -                                                            return v.state().catalogs
-+                                                            // Only show Cinemeta (movies/series). The redundant
-+                                                            // AIOMetadata / Public Domain rows are hidden, and the
-+                                                            // capped Anime Kitsu row is replaced by our own
-+                                                            // paginating anime row appended below.
++                                                            // Native Cinemeta (movies/series) rows plus our own
++                                                            // paginating "Anime" row (aCat) as one uniform list, so
++                                                            // focus navigation behaves natively. The redundant
++                                                            // AIOMetadata / Public Domain rows and the capped Anime
++                                                            // Kitsu row are hidden.
 +                                                            return v.state().catalogs.filter((function (c) {
 +                                                                if (!c) return false;
 +                                                                var mid = c.manifest && c.manifest.id;
 +                                                                if (mid) return "com.linvo.cinemeta" === mid;
 +                                                                return "top" === c.id;
-+                                                            }))
++                                                            })).concat([aCat])
                                                          },
                                                          children: (e, n) => (0, a.a0)(l.WC, {
                                                              get catalog() {
-@@ -256,7 +284,14 @@
+@@ -254,7 +283,10 @@
+                                                             },
+                                                             onFocus: T,
                                                              onChange: S,
-                                                             onSelect: Y
+-                                                            onSelect: Y
++                                                            onSelect: Y,
++                                                            get onNextPage() {
++                                                                return e() && e().__anime ? aNext : void 0
++                                                            }
                                                          })
--                                                    })
-+                                                    }), (0, a.a0)(l.WC, {
-+                                                        catalog: aCat,
-+                                                        index: 90,
-+                                                        get itemIndex() { return f() },
-+                                                        onChange: S,
-+                                                        onSelect: Y,
-+                                                        onNextPage: aNext
-+                                                    })]
+                                                     })
                                                  }
-                                             }), null), (0, a.gb)((() => (0, r.s7)(e, j.container))), e
-                                         }

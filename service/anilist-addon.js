@@ -202,7 +202,7 @@ function search(query, page) {
     if (c && (Date.now() - c.at) < 10 * 60 * 1000) return Promise.resolve(c.result);
     var body = JSON.stringify({
         query: 'query($s:String,$p:Int){ Page(page:$p, perPage:20){ pageInfo{ hasNextPage } ' +
-            'media(search:$s, type:ANIME, sort:SEARCH_MATCH){ id idMal title{ romaji english } ' +
+            'media(search:$s, type:ANIME, sort:POPULARITY_DESC){ id idMal title{ romaji english } ' +
             'coverImage{ extraLarge large } bannerImage description(asHtml:false) genres averageScore seasonYear episodes } } }',
         variables: { s: query, p: page }
     });
