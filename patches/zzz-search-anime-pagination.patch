@@ -1,0 +1,65 @@
+--- search.chunk.js	2026-07-11 00:29:14
++++ search.chunk.js	2026-07-11 00:29:14
+@@ -169,6 +169,25 @@
+                     }, _ = () => {
+                         m.clearSearchHistory()
+                     };
++                    // Custom paginating anime search row (AniList -> kitsu ids via
++                    // /anime-search). Refetches page 1 whenever the query changes;
++                    // onNextPage appends further pages for infinite scroll.
++                    const [aItems, setAItems] = (0, a.n5)([]);
++                    let aPage = 1, aBusy = !1, aHasNext = !0;
++                    const aFetch = reset => {
++                        const q = k();
++                        if (!q) { setAItems([]); return }
++                        if (reset) { aPage = 1; aHasNext = !0; setAItems([]) }
++                        if (aBusy || !aHasNext) return;
++                        aBusy = !0;
++                        fetch("http://127.0.0.1:8081/anime-search?page=" + aPage + "&q=" + encodeURIComponent(q)).then((e => e.json())).then((e => {
++                            const ms = e && e.metas || [];
++                            aHasNext = !!(e && e.hasNext); aPage += 1;
++                            setAItems(reset ? ms : aItems().concat(ms))
++                        })).catch((() => {})).then((() => { aBusy = !1 }))
++                    };
++                    (0, a.EH)((() => { k(); aFetch(!0) }));
++                    const aNext = () => aFetch(!1), aCat = { title: "Anime", get content() { return aItems() } };
+                     return (0, o.k9)([p, f], (([e, n]) => {
+                         y.setCache(U, {
+                             row: e,
+@@ -237,9 +256,18 @@
+                                                 },
+                                                 axis: "vertical",
+                                                 get children() {
+-                                                    return (0, a.a0)(a.jK, {
++                                                    return [(0, a.a0)(a.jK, {
+                                                         get each() {
+-                                                            return v.state().catalogs
++                                                            // Only show Cinemeta (movies/series). The redundant
++                                                            // AIOMetadata / Public Domain rows are hidden, and the
++                                                            // capped Anime Kitsu row is replaced by our own
++                                                            // paginating anime row appended below.
++                                                            return v.state().catalogs.filter((function (c) {
++                                                                if (!c) return false;
++                                                                var mid = c.manifest && c.manifest.id;
++                                                                if (mid) return "com.linvo.cinemeta" === mid;
++                                                                return "top" === c.id;
++                                                            }))
+                                                         },
+                                                         children: (e, n) => (0, a.a0)(l.WC, {
+                                                             get catalog() {
+@@ -256,7 +284,14 @@
+                                                             onChange: S,
+                                                             onSelect: Y
+                                                         })
+-                                                    })
++                                                    }), (0, a.a0)(l.WC, {
++                                                        catalog: aCat,
++                                                        index: 90,
++                                                        get itemIndex() { return f() },
++                                                        onChange: S,
++                                                        onSelect: Y,
++                                                        onNextPage: aNext
++                                                    })]
+                                                 }
+                                             }), null), (0, a.gb)((() => (0, r.s7)(e, j.container))), e
+                                         }
