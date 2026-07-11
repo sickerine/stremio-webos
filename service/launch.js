@@ -152,6 +152,19 @@ http.createServer(function(req, res) {
             return;
         }
     }
+    if (urlPath === '/anime-search') {
+        // Paginating anime search (AniList -> kitsu ids). Query: ?q=&page=
+        var q = require('url').parse(req.url, true).query || {};
+        anilistAddon.search(q.q, q.page).then(function (r) {
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-cache'
+            });
+            res.end(JSON.stringify(r));
+        }).catch(function () { res.writeHead(500); res.end('{"metas":[],"hasNext":false}'); });
+        return;
+    }
     if (urlPath === '/v5-worker.js') {
         // Prepend the fetch interceptor so core-in-worker addon requests are enriched.
         return fs.readFile(path.join(wwwDir, 'v5-worker.js'), function(err, buf) {

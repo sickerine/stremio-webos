@@ -187,6 +187,65 @@ function airingScheduleForKitsu(kitsuNumericId) {
     });
 }
 
+// ---- Paginating anime SEARCH (separate from the airing catalog) ------------
+// The Kitsu addon and Kitsu's own text API both cap search at ~20 and ignore
+// paging (offset is a no-op). AniList search paginates properly, so we search
+// AniList and map each hit to its Kitsu id (same pipeline as the airing tab),
+// giving real infinite-scroll anime search that still returns kitsu: ids.
+var searchCache = {}; // key `${q}|${page}` -> { at, result }
+function search(query, page) {
+    query = (query || '').trim();
+    if (!query) return Promise.resolve({ metas: [], hasNext: false });
+    page = Math.max(1, parseInt(page, 10) || 1);
+    var key = query.toLowerCase() + '|' + page;
+    var c = searchCache[key];
+    if (c && (Date.now() - c.at) < 10 * 60 * 1000) return Promise.resolve(c.result);
+    var body = JSON.stringify({
+        query: 'query($s:String,$p:Int){ Page(page:$p, perPage:20){ pageInfo{ hasNextPage } ' +
+            'media(search:$s, type:ANIME, sort:SEARCH_MATCH){ id idMal title{ romaji english } ' +
+            'coverImage{ extraLarge large } bannerImage description(asHtml:false) genres averageScore seasonYear episodes } } }',
+        variables: { s: query, p: page }
+    });
+    return getJson({
+        hostname: 'graphql.anilist.co', path: '/', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0', 'Content-Length': Buffer.byteLength(body) }
+    }, body).then(function (d) {
+        var pg = (((d || {}).data || {}).Page) || {};
+        var media = pg.media || [];
+        var hasNext = !!(pg.pageInfo && pg.pageInfo.hasNextPage);
+        return Promise.all(media.map(function (m) {
+            return (m.idMal ? malToKitsu(m.idMal) : Promise.resolve(null)).then(function (r) {
+                if (r) return r;
+                return anilistToKitsuARM(m.id).then(function (kid) {
+                    if (!kid) return null;
+                    return kitsuAttrs(kid).then(function (at) { return { kid: kid, at: at }; });
+                });
+            }).then(function (r) {
+                if (!r) return null;
+                var at = r.at || {}, ci = m.coverImage || {};
+                var alDesc = (m.description || '').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').trim();
+                return {
+                    id: 'kitsu:' + r.kid,
+                    type: 'series',
+                    name: at.canonicalTitle || m.title.english || m.title.romaji,
+                    poster: (at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined,
+                    posterShape: 'poster',
+                    background: (at.coverImage && at.coverImage.original) || m.bannerImage || ci.extraLarge || undefined,
+                    description: at.synopsis || alDesc || undefined,
+                    genres: (m.genres && m.genres.length) ? m.genres : undefined,
+                    releaseInfo: (at.startDate ? at.startDate.slice(0, 4) : (m.seasonYear ? String(m.seasonYear) : undefined)),
+                    imdbRating: (at.averageRating ? (parseFloat(at.averageRating) / 10).toFixed(1) : ((typeof m.averageScore === 'number') ? (m.averageScore / 10).toFixed(1) : undefined))
+                };
+            });
+        })).then(function (items) {
+            var result = { metas: items.filter(Boolean), hasNext: hasNext };
+            searchCache[key] = { at: Date.now(), result: result };
+            return result;
+        });
+    }).catch(function () { return { metas: [], hasNext: false }; });
+}
+
 var MANIFEST = {
     id: 'io.stremio.patched.anilist',
     version: '1.0.0',
@@ -220,4 +279,4 @@ function handle(pathname) {
     return null;
 }
 
-module.exports = { handle: handle, MANIFEST: MANIFEST, _buildCatalog: buildCatalog };
+module.exports = { handle: handle, MANIFEST: MANIFEST, _buildCatalog: buildCatalog, search: search };
