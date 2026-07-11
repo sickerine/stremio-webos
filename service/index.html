@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Stremio</title>
     <script>window.__STREMIO_SERVER_URL__ = 'http://127.0.0.1:8081';</script>
+    <style>
+        /* Live airing overlay drawn on schedule posters (Anime page). */
+        .ap-ov { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+            padding: 2.4rem .5rem .55rem; text-align: center; pointer-events: none; line-height: 1.15;
+            background: linear-gradient(transparent, rgba(0,0,0,.92)); }
+        .ap-ov-ep { font-size: 1.05rem; font-weight: 700; color: hsla(0,0%,100%,.95); }
+        .ap-ov-cd { font-size: 1rem; font-weight: 600; color: #7b5bf5; }
+    </style>
     <script>
         // For anime (kitsu ids) re-sort streams by seeders (health matters more
         // than a mislabeled quality tag); everything else keeps Torrentio's
