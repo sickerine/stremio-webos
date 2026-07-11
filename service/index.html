@@ -115,6 +115,111 @@
         })();
     </script>
     <script>
+        // True ASS subtitle rendering for anime (libass-wasm / SubtitlesOctopus).
+        // On kitsu playback: suppress subtitle auto-selection, probe the file for
+        // an English ASS track, extract it (+ embedded fonts) via the service,
+        // then render on a canvas over the video. Falls back to normal subtitle
+        // selection when the file has no ASS or extraction fails.
+        (function () {
+            var st = null;
+            function playerHash() {
+                var h = '';
+                try { h = decodeURIComponent(location.hash || ''); } catch (e) { h = location.hash || ''; }
+                return /#\/player\//.test(h) ? h : null;
+            }
+            function findMediaUrl() {
+                var v = document.querySelector('video');
+                if (v && v.currentSrc && /^https?:/.test(v.currentSrc)) {
+                    var m = /[?&]mediaURL=([^&]+)/.exec(v.currentSrc);
+                    return m ? decodeURIComponent(m[1]) : v.currentSrc;
+                }
+                try {
+                    var es = performance.getEntriesByType('resource');
+                    for (var i = es.length - 1; i >= 0; i--) {
+                        var m2 = /[?&]mediaURL=([^&]+)/.exec(es[i].name || '');
+                        if (m2) return decodeURIComponent(m2[1]);
+                    }
+                } catch (e) {}
+                return null;
+            }
+            function resolveNoAss() {
+                window.__assPending = false; window.__assActive = false;
+                var f = window.__assOnResolve; window.__assOnResolve = null;
+                f && f();
+            }
+            function stop() {
+                if (st) {
+                    if (st.oct) { try { st.oct.dispose(); } catch (e) {} }
+                    clearInterval(st.poll); clearTimeout(st.t);
+                    st = null;
+                }
+                window.__assPending = false; window.__assActive = false; window.__assOnResolve = null;
+            }
+            function loadScript(u, cb) {
+                var s = document.createElement('script');
+                s.src = u; s.onload = cb; s.onerror = function () { cb(new Error('load')); };
+                document.head.appendChild(s);
+            }
+            function start(q, probe) {
+                var v = document.querySelector('video');
+                if (!st || !v) return;
+                var fonts = (probe.fonts || []).map(function (f) {
+                    return location.origin + '/ass/font?u=' + encodeURIComponent(st.mediaUrl) + '&f=' + encodeURIComponent(f);
+                });
+                loadScript('/octopus/subtitles-octopus.js', function (err) {
+                    if (err || !st || !window.SubtitlesOctopus) return;
+                    try {
+                        st.oct = new SubtitlesOctopus({
+                            video: v,
+                            subUrl: location.origin + '/ass/file?' + q,
+                            fonts: fonts,
+                            workerUrl: '/octopus/subtitles-octopus-worker.js',
+                            prescaleFactor: 0.8,
+                            targetFps: 30
+                        });
+                    } catch (e) {}
+                });
+            }
+            function begin(key) {
+                st = { key: key, oct: null };
+                window.__assPending = true; window.__assActive = false;
+                var tries = 0;
+                st.poll = setInterval(function () {
+                    if (!st || st.key !== key) return;
+                    var mu = findMediaUrl();
+                    if (!mu) { if (++tries > 60) { clearInterval(st.poll); resolveNoAss(); } return; }
+                    clearInterval(st.poll);
+                    st.mediaUrl = mu;
+                    fetch('/ass/probe?u=' + encodeURIComponent(mu)).then(function (r) { return r.json(); }).then(function (p) {
+                        if (!st || st.key !== key) return;
+                        var eng = (p.subs || []).filter(function (s) { return /^en/i.test(s.lang || ''); });
+                        var pick = eng.find(function (s) { return /full|dialog/i.test(s.title || ''); })
+                            || eng.find(function (s) { return !/sign|song/i.test(s.title || ''); })
+                            || eng[0];
+                        if (!pick) return resolveNoAss();
+                        window.__assActive = true; window.__assPending = false;
+                        var q = 'u=' + encodeURIComponent(mu) + '&idx=' + pick.index;
+                        (function waitReady() {
+                            if (!st || st.key !== key) return;
+                            fetch('/ass/prepare?' + q).then(function (r) { return r.json(); }).then(function (d) {
+                                if (!st || st.key !== key) return;
+                                if (d.ready) start(q, p);
+                                else if (d.error) resolveNoAss();
+                                else st.t = setTimeout(waitReady, 3000);
+                            }).catch(function () { st.t = setTimeout(waitReady, 5000); });
+                        })();
+                    }).catch(function () { resolveNoAss(); });
+                }, 700);
+            }
+            setInterval(function () {
+                var h = playerHash();
+                if (h && /kitsu:\d+/.test(h)) {
+                    if (!st || st.key !== h) { stop(); begin(h); }
+                } else if (st) stop();
+            }, 700);
+        })();
+    </script>
+    <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.getRegistrations().then(function(rs) {
                 rs.forEach(function(r) { r.unregister(); });
