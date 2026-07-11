@@ -10,24 +10,76 @@
              });
              var s = n(9151),
                  r = n(9225),
-@@ -194,8 +195,21 @@
+@@ -194,8 +195,73 @@
                              var e
                          }
                      })
 +                },
 +                X = () => {
-+                    // Native "Anime" page: a custom multi-row weekly schedule with
-+                    // live countdowns. The heavy rendering lives in the non-minified
-+                    // /anime-page.js (window.__animePage); this route component just
-+                    // hosts its root element and drives mount/unmount with the route
-+                    // lifecycle so timers/listeners are cleaned up on navigation.
-+                    const root = document.createElement("div");
-+                    root.className = "ap-root";
-+                    (0, r.Ki)((() => {
-+                        try { window.__animePage && window.__animePage.unmount(); } catch (e) {}
-+                    }));
-+                    try { window.__animePage && window.__animePage.mount(root); } catch (e) {}
-+                    return root;
++                    // Native "Anime" page — built exactly like the HOME page: a
++                    // vertical stack of native catalog rows (c.WC), the first being
++                    // "Top Airing" (relevance) and the next seven one per weekday
++                    // starting today. Rows are synthesized locally from our
++                    // /anime-airing/schedule-week feed (plain { title, content }
++                    // catalogs that c.WC renders directly), so nothing is installed
++                    // as an addon and the sidebar/focus behaviour is 100% native.
++                    const [B, setB] = (0, r.n5)(null),
++                        [rowIx, setRowIx] = (0, r.n5)(0),
++                        [itemIx, setItemIx] = (0, r.n5)(0),
++                        [x, D, E] = (0, i.zD)(),
++                        [cats, setCats] = (0, r.n5)([]);
++                    let metasRef = [],
++                        today = -1;
++                    const WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
++                    const build = () => {
++                        const metas = metasRef;
++                        today = (new Date).getDay();
++                        const rows = [{ title: "Top Airing", content: metas }];
++                        for (let n = 0; n < 7; n++) {
++                            const wd = (today + n) % 7,
++                                items = metas.filter((e => e.airingAt && (new Date(1e3 * e.airingAt)).getDay() === wd)).sort(((e, t) => e.airingAt - t.airingAt)),
++                                label = (0 === n ? "Today · " : 1 === n ? "Tomorrow · " : "") + WEEK[wd];
++                            rows.push({ title: label, content: items });
++                        }
++                        setCats(rows);
++                    };
++                    const pull = () => fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json())).then((e => { metasRef = e && e.metas || metasRef, build() })).catch((() => {}));
++                    pull();
++                    // Keep it fresh over long sessions: re-bucket at local-midnight
++                    // rollover, refetch the feed every 30 min.
++                    const t1 = setInterval((() => { metasRef.length && (new Date).getDay() !== today && build() }), 6e4),
++                        t2 = setInterval(pull, 18e5);
++                    (0, r.Ki)((() => { clearInterval(t1), clearInterval(t2) }));
++                    const onFocus = e => setRowIx(e),
++                        onChange = (e, t) => (0, r.vA)((() => { setB(e), setItemIx(t) }));
++                    return (0, r.a0)(c.YW, {
++                        get class() { return F.discover },
++                        get children() {
++                            return [(0, r.a0)(c.bp, {
++                                get item() { return B() },
++                                open: x,
++                                onClose: E
++                            }), (0, r.a0)(c.OY, {
++                                get class() { return F.content },
++                                axis: "vertical",
++                                get children() {
++                                    return (0, r.a0)(r.jK, {
++                                        get each() { return cats() },
++                                        children: (e, t) => (0, r.a0)(c.WC, {
++                                            get catalog() { return e() },
++                                            index: t,
++                                            get itemIndex() { return itemIx() },
++                                            get autoFocus() { return rowIx() === t },
++                                            onFocus: onFocus,
++                                            onChange: onChange,
++                                            onSelect: D,
++                                            onNextPage: () => {}
++                                        })
++                                    })
++                                }
++                            })];
++                        }
++                    })
                  }
 -                }
          }
