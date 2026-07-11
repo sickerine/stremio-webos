@@ -4,17 +4,15 @@
                  return "in " + o.join(" ");
              }
              var __apOv = (0, r.vs)("<div class=ap-ov><div class=ap-ov-ep></div><div class=ap-ov-cd></div>");
-+            var __apNu = (0, r.vs)("<div class=ap-ov><div class=ap-ov-cd></div><div class=ap-nu-bar><div class=ap-nu-in>");
++            var __apNu = (0, r.vs)("<div class=ap-ov><div class=ap-nu-name></div><div class=ap-ov-cd></div><div class=ap-nu-bar><div class=ap-nu-in>");
              const se = ["movies", "series", "channels", "tv"],
                  ce = e => {
                      const {
-@@ -1330,9 +1331,37 @@
-                                         },
-                                         name: "checkmark"
-                                     })), (0, o.gb)((() => (0, r.s7)(e, oe.watched))), e
-+                                }
-+                            }), (0, o.a0)(o.wv, {
-+                                get when() {
+@@ -1333,7 +1334,40 @@
+                                 }
+                             }), (0, o.a0)(o.wv, {
+                                 get when() {
+-                                    return e.item && e.item.airingAt
 +                                    // In-library indicator on browse cards (addon metas
 +                                    // only — library-backed cards have their own badges).
 +                                    return __apTick[0](), !n() && !a() && e.item && e.item.id && window.__inLibrary && window.__inLibrary(e.item.id)
@@ -27,26 +25,32 @@
 +                                        },
 +                                        name: "library-outline"
 +                                    })), (0, o.gb)((() => (0, r.s7)(t, oe.watched))), t
-                                 }
-                             }), (0, o.a0)(o.wv, {
-                                 get when() {
++                                }
++                            }), (0, o.a0)(o.wv, {
++                                get when() {
 +                                    return e.item && e.item.nextUp
 +                                },
 +                                get children() {
-+                                    var t = __apNu(), n = t.firstChild, i = n.nextSibling, a = i.firstChild;
++                                    var t = __apNu(), nm = t.firstChild, n = nm.nextSibling, i = n.nextSibling, a = i.firstChild;
 +                                    return (0, o.EH)((function () {
-+                                        var u = e.item.nextUp || {};
-+                                        n.textContent = u.label || "";
++                                        var u = e.item.nextUp || {}, l = u.label || "";
++                                        if (e.item.airingAt) {
++                                            var s = e.item.airingAt - Math.floor(__apTick[0]() / 1e3);
++                                            l += " · " + __apFmt(s)
++                                        }
++                                        nm.textContent = u.show || "";
++                                        n.textContent = l;
 +                                        i.style.display = u.progress ? "" : "none";
 +                                        a.style.width = (u.progress || 0) + "%"
 +                                    })), t
 +                                }
 +                            }), (0, o.a0)(o.wv, {
 +                                get when() {
-                                     return e.item && e.item.airingAt
++                                    return e.item && e.item.airingAt && !e.item.nextUp
                                  },
                                  get children() {
-@@ -11517,6 +11546,14 @@
+                                     var t = __apOv(), n = t.firstChild, i = n.nextSibling;
+@@ -11517,6 +11551,14 @@
                              var e, n;
                              return null !== (e = null === (n = t()) || void 0 === n ? void 0 : n.user) && void 0 !== e ? e : null
                          }));
@@ -61,7 +65,7 @@
                      return { ...e,
                          isAuthenticated: a,
                          user: s,
-@@ -11531,8 +11568,8 @@
+@@ -11531,8 +11573,8 @@
                          syncAddons: () => e.dispatchAction("PullAddonsFromAPI"),
                          syncLibrary: () => e.dispatchAction("SyncLibraryWithAPI"),
                          syncNotifications: () => e.dispatchAction("PullNotifications"),
