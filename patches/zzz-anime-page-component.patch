@@ -10,72 +10,24 @@
              });
              var s = n(9151),
                  r = n(9225),
-@@ -194,8 +195,69 @@
+@@ -194,8 +195,21 @@
                              var e
                          }
                      })
 +                },
 +                X = () => {
-+                    const {
-+                        discover: d
-+                    } = (0, a.gK)(), {
-+                        pages: u
-+                    } = (0, a.Pj)(), {
-+                        getCache: p,
-+                        setCache: m
-+                    } = u, [h, f] = (0, r.n5)((null === (_ = p("anime")) || void 0 === _ ? void 0 : _.item) || 0);
-+                    var _;
-+                    const [C, b] = (0, r.n5)(null), [x, N, k] = (0, i.zD)(), W = (e, t) => {
-+                        (0, r.vA)((() => {
-+                            b(e), f(t)
-+                        }))
-+                    }, w = () => {
-+                        d.loadNextPage()
-+                    };
-+                    return (0, r.EH)((() => {
-+                        d.loadCatalog("http://127.0.0.1:8081/anime-airing/manifest.json", "series", "anilist-airing", [])
-+                    })), (0, i.k9)(h, (e => {
-+                        m("anime", {
-+                            item: e
-+                        })
-+                    })), (0, r.Ki)((() => {
-+                        d.unload()
-+                    })), (0, r.a0)(c.YW, {
-+                        get class() {
-+                            return F.discover
-+                        },
-+                        get children() {
-+                            return [(0, r.a0)(c.Gn, {
-+                                get item() {
-+                                    return C()
-+                                }
-+                            }), (0, r.a0)(c.bp, {
-+                                get item() {
-+                                    return C()
-+                                },
-+                                open: x,
-+                                onClose: k
-+                            }), (e = R(), (0, s.Yr)(e, (0, r.a0)(r.wv, {
-+                                get when() {
-+                                    return d.catalog()
-+                                },
-+                                children: e => (0, r.a0)(c.WC, {
-+                                    get catalog() {
-+                                        return e()
-+                                    },
-+                                    index: 0,
-+                                    get itemIndex() {
-+                                        return h()
-+                                    },
-+                                    autoFocus: !0,
-+                                    onChange: W,
-+                                    onNextPage: w,
-+                                    onSelect: N
-+                                })
-+                            }), null), (0, r.gb)((() => (0, s.s7)(e, F.content))), e)];
-+                            var e
-+                        }
-+                    })
++                    // Native "Anime" page: a custom multi-row weekly schedule with
++                    // live countdowns. The heavy rendering lives in the non-minified
++                    // /anime-page.js (window.__animePage); this route component just
++                    // hosts its root element and drives mount/unmount with the route
++                    // lifecycle so timers/listeners are cleaned up on navigation.
++                    const root = document.createElement("div");
++                    root.className = "ap-root";
++                    (0, r.Ki)((() => {
++                        try { window.__animePage && window.__animePage.unmount(); } catch (e) {}
++                    }));
++                    try { window.__animePage && window.__animePage.mount(root); } catch (e) {}
++                    return root;
                  }
 -                }
          }

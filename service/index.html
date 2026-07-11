@@ -6,25 +6,6 @@
     <title>Stremio</title>
     <script>window.__STREMIO_SERVER_URL__ = 'http://127.0.0.1:8081';</script>
     <script>
-        // Anime tab overlay: a full-screen iframe grid (served at /anime.html)
-        // opened from the injected sidebar button, closed on Back or selection.
-        window.__openAnimeGrid = function () {
-            if (document.getElementById('__animeGrid')) return;
-            var o = document.createElement('div');
-            o.id = '__animeGrid';
-            o.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;z-index:2147483000;background:#0c0b11';
-            var f = document.createElement('iframe');
-            f.src = '/anime.html';
-            f.setAttribute('scrolling', 'no');
-            f.style.cssText = 'width:100%;height:100%;border:0;display:block';
-            o.appendChild(f);
-            document.body.appendChild(o);
-            setTimeout(function () { try { f.contentWindow.focus(); } catch (e) {} }, 60);
-        };
-        window.__closeAnimeGrid = function () {
-            var o = document.getElementById('__animeGrid');
-            if (o) o.parentNode.removeChild(o);
-        };
         // For anime (kitsu ids) re-sort streams by seeders (health matters more
         // than a mislabeled quality tag); everything else keeps Torrentio's
         // default quality-first order.
@@ -50,6 +31,7 @@
             }).catch(function(){});
         }
     </script>
+    <script defer src="anime-page.js"></script>
     <script defer src="runtime.js"></script>
     <script defer src="main.js"></script>
     <script defer src="service.js"></script>
