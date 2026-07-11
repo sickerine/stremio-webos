@@ -10,7 +10,7 @@
              });
              var s = n(9151),
                  r = n(9225),
-@@ -194,8 +195,73 @@
+@@ -194,8 +195,78 @@
                              var e
                          }
                      })
@@ -42,6 +42,9 @@
 +                            rows.push({ title: label, content: items });
 +                        }
 +                        setCats(rows);
++                        // Seed the top metadata preview with the first show so the
++                        // hero panel isn't blank before anything is focused.
++                        B() || (metas.length && setB(metas[0]));
 +                    };
 +                    const pull = () => fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json())).then((e => { metasRef = e && e.metas || metasRef, build() })).catch((() => {}));
 +                    pull();
@@ -55,7 +58,9 @@
 +                    return (0, r.a0)(c.YW, {
 +                        get class() { return F.discover },
 +                        get children() {
-+                            return [(0, r.a0)(c.bp, {
++                            return [(0, r.a0)(c.Gn, {
++                                get item() { return B() }
++                            }), (0, r.a0)(c.bp, {
 +                                get item() { return B() },
 +                                open: x,
 +                                onClose: E
