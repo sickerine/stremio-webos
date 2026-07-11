@@ -74,8 +74,18 @@ function malToKitsu(malId) {
         method: 'GET', headers: { 'Accept': 'application/vnd.api+json' }
     }).then(function (d) {
         var inc = (d || {}).included || [];
-        return inc.length ? inc[0].id : null;
+        return inc.length ? { kid: inc[0].id, at: inc[0].attributes || {} } : null;
     }).catch(function () { return null; });
+}
+
+// Fetch attributes for an id that came from the ARM fallback.
+function kitsuAttrs(kid) {
+    return getJson({
+        hostname: 'kitsu.io', path: '/api/edge/anime/' + kid,
+        method: 'GET', headers: { 'Accept': 'application/vnd.api+json' }
+    }).then(function (d) {
+        return ((d || {}).data || {}).attributes || {};
+    }).catch(function () { return {}; });
 }
 
 // Fallback for entries Kitsu's own mapping table doesn't know yet (brand-new
@@ -96,22 +106,30 @@ function buildCatalog() {
     return fetchAniListAiring().then(function (media) {
         // Map all in parallel; keep only those with a Kitsu id (playable).
         return Promise.all(media.map(function (m) {
-            return malToKitsu(m.idMal).then(function (kid) {
-                return kid || anilistToKitsuARM(m.id);
-            }).then(function (kid) {
-                if (!kid) return null;
-                var ci = m.coverImage || {};
+            return malToKitsu(m.idMal).then(function (r) {
+                if (r) return r;
+                return anilistToKitsuARM(m.id).then(function (kid) {
+                    if (!kid) return null;
+                    return kitsuAttrs(kid).then(function (at) { return { kid: kid, at: at }; });
+                });
+            }).then(function (r) {
+                if (!r) return null;
+                // Display metadata comes from KITSU so the grid matches what the
+                // detail page (Kitsu addon) shows; AniList only provides the
+                // season list + ranking, and fills any missing fields.
+                var at = r.at || {}, ci = m.coverImage || {};
+                var alDesc = (m.description || '').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').trim();
                 return {
-                    id: 'kitsu:' + kid,
+                    id: 'kitsu:' + r.kid,
                     type: 'series',
-                    name: (m.title.english || m.title.romaji),
-                    poster: ci.extraLarge || ci.large || undefined,
+                    name: at.canonicalTitle || m.title.english || m.title.romaji,
+                    poster: (at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined,
                     posterShape: 'poster',
-                    background: m.bannerImage || ci.extraLarge || undefined,
-                    description: (m.description || '').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').trim() || undefined,
+                    background: (at.coverImage && at.coverImage.original) || m.bannerImage || ci.extraLarge || undefined,
+                    description: at.synopsis || alDesc || undefined,
                     genres: (m.genres && m.genres.length) ? m.genres : undefined,
-                    releaseInfo: m.seasonYear ? String(m.seasonYear) : undefined,
-                    imdbRating: (typeof m.averageScore === 'number') ? (m.averageScore / 10).toFixed(1) : undefined
+                    releaseInfo: (at.startDate ? at.startDate.slice(0, 4) : (m.seasonYear ? String(m.seasonYear) : undefined)),
+                    imdbRating: (at.averageRating ? (parseFloat(at.averageRating) / 10).toFixed(1) : ((typeof m.averageScore === 'number') ? (m.averageScore / 10).toFixed(1) : undefined))
                 };
             });
         })).then(function (items) { return items.filter(Boolean); });
