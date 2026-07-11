@@ -123,6 +123,9 @@ function buildCatalog() {
                 return {
                     id: 'kitsu:' + r.kid,
                     type: 'series',
+                    // Detail-page deep link so the item popup's Play/Details
+                    // buttons work (the app no-ops navigate(undefined) otherwise).
+                    deepLinks: { metaDetailsVideos: '#/detail/series/kitsu:' + r.kid },
                     name: at.canonicalTitle || m.title.english || m.title.romaji,
                     poster: (at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined,
                     posterShape: 'poster',
@@ -228,6 +231,9 @@ function search(query, page) {
                 return {
                     id: 'kitsu:' + r.kid,
                     type: 'series',
+                    // Detail-page deep link so the item popup's Play/Details
+                    // buttons work (the app no-ops navigate(undefined) otherwise).
+                    deepLinks: { metaDetailsVideos: '#/detail/series/kitsu:' + r.kid },
                     name: at.canonicalTitle || m.title.english || m.title.romaji,
                     poster: (at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined,
                     posterShape: 'poster',
