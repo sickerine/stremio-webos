@@ -33,6 +33,7 @@ build: service/server.js service/bin/ffmpeg service/bin/ffprobe
 	@rm -rf service/www && mkdir -p service/www
 	@cp /tmp/stremio-vidaa-build/*.js /tmp/stremio-vidaa-build/*.wasm /tmp/stremio-vidaa-build/*.ttf /tmp/stremio-vidaa-build/*.png /tmp/stremio-vidaa-build/*.svg service/www/
 	@cp service/index.html service/www/index.html
+	@cp service/anime-page.js service/www/anime-page.js
 	@rm -rf /tmp/stremio-vidaa-build
 	@for p in patches/*.patch; do \
 		echo "    Applying $$(basename $$p)..."; \

@@ -54,7 +54,7 @@ function fetchAniListAiring() {
     // than all-time popularity (which would put perpetual long-runners first).
     var query = '{ Page(page:1, perPage:50) { media(type:ANIME, status:RELEASING, format_in:[TV, ONA], sort:TRENDING_DESC) ' +
         '{ id idMal title { romaji english } coverImage { extraLarge large } bannerImage description(asHtml:false) ' +
-        'genres averageScore seasonYear episodes } } }';
+        'genres averageScore seasonYear episodes nextAiringEpisode { airingAt timeUntilAiring episode } } } }';
     var body = JSON.stringify({ query: query });
     return getJson({
         hostname: 'graphql.anilist.co', path: '/', method: 'POST',
@@ -119,6 +119,7 @@ function buildCatalog() {
                 // season list + ranking, and fills any missing fields.
                 var at = r.at || {}, ci = m.coverImage || {};
                 var alDesc = (m.description || '').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').trim();
+                var nae = m.nextAiringEpisode || null;
                 return {
                     id: 'kitsu:' + r.kid,
                     type: 'series',
@@ -129,7 +130,13 @@ function buildCatalog() {
                     description: at.synopsis || alDesc || undefined,
                     genres: (m.genres && m.genres.length) ? m.genres : undefined,
                     releaseInfo: (at.startDate ? at.startDate.slice(0, 4) : (m.seasonYear ? String(m.seasonYear) : undefined)),
-                    imdbRating: (at.averageRating ? (parseFloat(at.averageRating) / 10).toFixed(1) : ((typeof m.averageScore === 'number') ? (m.averageScore / 10).toFixed(1) : undefined))
+                    imdbRating: (at.averageRating ? (parseFloat(at.averageRating) / 10).toFixed(1) : ((typeof m.averageScore === 'number') ? (m.averageScore / 10).toFixed(1) : undefined)),
+                    // Extra fields for the weekly schedule page (ignored by the
+                    // Stremio catalog board, consumed by /anime-airing/schedule-week).
+                    banner: m.bannerImage || (at.coverImage && at.coverImage.original) || undefined,
+                    airingAt: nae ? nae.airingAt : null,        // epoch seconds of the NEXT episode
+                    nextEpisode: nae ? nae.episode : null,      // upcoming episode number
+                    totalEpisodes: (typeof m.episodes === 'number') ? m.episodes : (at.episodeCount || null)
                 };
             });
         })).then(function (items) { return items.filter(Boolean); });
@@ -201,6 +208,12 @@ function handle(pathname) {
     if (pathname === '/anime-airing/manifest.json')
         return Promise.resolve({ status: 200, body: JSON.stringify(MANIFEST) });
     if (pathname === '/anime-airing/catalog/series/anilist-airing.json' || pathname === '/anime-airing/catalog/anime/anilist-airing.json')
+        return getMetas().then(function (metas) {
+            return { status: 200, body: JSON.stringify({ metas: metas }) };
+        });
+    // Weekly schedule feed for the native Anime page (relevance order + per-show
+    // airing time/episode info; the client groups by weekday and ticks timers).
+    if (pathname === '/anime-airing/schedule-week.json')
         return getMetas().then(function (metas) {
             return { status: 200, body: JSON.stringify({ metas: metas }) };
         });
