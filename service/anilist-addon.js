@@ -266,6 +266,19 @@ function search(query, page) {
 // Takes full library items (with watch state) and computes, per show: the
 // episode to surface (in-progress with %, or the next unwatched one), plus a
 // sort key = the newest aired episode date ("last episode added").
+var AIO_HOST = 'aiometadatafortheweebs.midnightignite.me';
+var AIO_PATH = '/stremio/e403afb8-02d5-416e-b520-6b9bb80e8e2f';
+var aioCache = {};
+function fetchAIOMeta(id) {
+    var c = aioCache[id];
+    if (c && (Date.now() - c.at) < 30 * 60 * 1000) return Promise.resolve(c.meta);
+    return getJson({ hostname: AIO_HOST, path: AIO_PATH + '/meta/series/' + encodeURIComponent(id) + '.json',
+        method: 'GET', headers: { 'Accept': 'application/json' } }).then(function (d) {
+        var m = (d || {}).meta || null;
+        aioCache[id] = { at: Date.now(), meta: m };
+        return m;
+    }).catch(function () { return null; });
+}
 var metaCache = {};
 function fetchSeriesMeta(id) {
     var c = metaCache[id];
@@ -334,12 +347,20 @@ function buildNextUp(libItems) {
             else { target = released[idx]; prog = frac > 0.02 ? frac : 0; }
             var latest = '';
             released.forEach(function (v) { var r = relOf(v) || v.released || ''; if (r > latest) latest = r; });
+            // Caught up -> surface the next unaired episode instead.
+            var un = null;
+            if (!target) for (var j = 0; j < vids.length; j++) {
+                var rr = relOf(vids[j]); if (rr && rr > nowIso) { un = { v: vids[j], r: rr }; break; }
+            }
+            var shown = target || (un && un.v) || null;
+            var showName = meta.name || it.name;
             var out = {
                 id: it._id,
                 type: 'series',
-                name: meta.name || it.name,
-                poster: meta.poster || it.poster || undefined,
-                posterShape: 'poster',
+                name: showName,
+                // Episode-card look: landscape episode still (like the detail
+                // page's episode list), falling back to background art.
+                posterShape: 'landscape',
                 background: meta.background || undefined,
                 description: meta.description || undefined,
                 __ours: true,
@@ -347,20 +368,28 @@ function buildNextUp(libItems) {
                 deepLinks: { metaDetailsVideos: '#/detail/series/' + encodeURIComponent(it._id) +
                     (target ? '/' + encodeURIComponent(target.id) : '') }
             };
-            if (target) {
-                var ep = target.episode || parseInt(String(target.id).split(':').pop(), 10);
-                var label = (!isKitsu && null != target.season) ? ('S' + target.season + 'E' + ep) : ('EP ' + ep);
-                out.nextUp = { label: (prog ? label : 'NEXT · ' + label), progress: Math.round(100 * prog) };
-            } else {
-                // fully caught up: surface the next unaired episode's countdown
-                var un = null;
-                for (var j = 0; j < vids.length; j++) { var rr = relOf(vids[j]); if (rr && rr > nowIso) { un = { v: vids[j], r: rr }; break; } }
-                if (un) {
-                    out.airingAt = Math.floor(new Date(un.r).getTime() / 1000);
-                    out.nextEpisode = un.v.episode || parseInt(String(un.v.id).split(':').pop(), 10);
-                } else out.nextUp = { label: 'UP TO DATE', progress: 0 };
-            }
-            return out;
+            var thumbP = Promise.resolve(shown && shown.thumbnail);
+            if (isKitsu && shown && !shown.thumbnail)
+                thumbP = fetchAIOMeta(it._id).then(function (am) {
+                    var v = am && (am.videos || []).find(function (x) { return x.id === shown.id; });
+                    return (v && v.thumbnail) || null;
+                });
+            return thumbP.then(function (thumb) {
+                out.poster = thumb || meta.background || meta.poster || it.poster || undefined;
+                function epLabelOf(v) {
+                    var ep = v.episode || parseInt(String(v.id).split(':').pop(), 10);
+                    return (!isKitsu && null != v.season) ? ('S' + v.season + 'E' + ep) : ('EP ' + ep);
+                }
+                if (target) {
+                    out.nextUp = { show: showName, label: (prog ? '' : 'NEXT · ') + epLabelOf(target), progress: Math.round(100 * prog) };
+                } else if (un) {
+                    out.nextUp = { show: showName, label: epLabelOf(un.v), progress: 0 };
+                    out.airingAt = Math.floor(new Date(un.r).getTime() / 1000); // client appends live countdown
+                } else {
+                    out.nextUp = { show: showName, label: 'UP TO DATE', progress: 0 };
+                }
+                return out;
+            });
         });
     })).then(function (list) {
         return list.filter(Boolean).sort(function (a, b) {
