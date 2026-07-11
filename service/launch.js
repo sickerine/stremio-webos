@@ -77,6 +77,45 @@ var SELF_DESTRUCT_SW = [
     "});"
 ].join("\n");
 
+// Meta-enrichment interceptor, injected into the core's Web Worker (and the
+// page) at serve time. Kitsu's per-season meta entries are the right SHAPE
+// (one page per season, matching the Anime tab), but their episode lists are
+// bare for airing shows. AIOMetadata has per-episode overviews/thumbnails/
+// titles and uses the SAME kitsu:<id>:<ep> video ids, so responses from the
+// Kitsu addon get episodes enriched in-flight, matched strictly by video id.
+var FETCH_INTERCEPT = [
+    "(function(){",
+    "  var AIO='https://aiometadatafortheweebs.midnightignite.me/stremio/e403afb8-02d5-416e-b520-6b9bb80e8e2f';",
+    "  var g=(typeof self!=='undefined')?self:window;",
+    "  if(!g.fetch||g.__kitsuEnrich)return; g.__kitsuEnrich=1;",
+    "  var of=g.fetch.bind(g);",
+    "  g.fetch=function(input,init){",
+    "    var url=(typeof input==='string')?input:((input&&input.url)||'');",
+    "    var m=/anime-kitsu\\.strem\\.fun\\/meta\\/(?:series|anime)\\/(kitsu(?::|%3A)\\d+)\\.json/i.exec(url);",
+    "    if(!m)return of(input,init);",
+    "    var kid;try{kid=decodeURIComponent(m[1]);}catch(e){kid=m[1];}",
+    "    var aiop=of(AIO+'/meta/series/'+encodeURIComponent(kid)+'.json')",
+    "      .then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});",
+    "    return Promise.all([of(input,init),aiop]).then(function(rs){",
+    "      var kres=rs[0],aio=rs[1];",
+    "      if(!aio||!aio.meta||!kres.ok)return kres;",
+    "      return kres.json().then(function(kd){",
+    "        var vids=(kd.meta&&kd.meta.videos)||[],byId={};",
+    "        ((aio.meta.videos)||[]).forEach(function(v){byId[v.id]=v;});",
+    "        vids.forEach(function(v){",
+    "          var e=byId[v.id]; if(!e)return;",
+    "          var ov=e.overview||e.description;",
+    "          if(!v.overview&&ov){v.overview=ov;v.description=ov;}",
+    "          if(!v.thumbnail&&e.thumbnail)v.thumbnail=e.thumbnail;",
+    "          if(e.title&&!/^Episode \\d+$/i.test(e.title)&&(!v.title||/^Episode \\d+$/i.test(v.title)))v.title=e.title;",
+    "        });",
+    "        return new Response(JSON.stringify(kd),{status:200,headers:{'Content-Type':'application/json'}});",
+    "      }).catch(function(){return of(input,init);});",
+    "    });",
+    "  };",
+    "})();\n"
+].join("\n");
+
 // Single server: static files first, then proxy to streaming server
 http.createServer(function(req, res) {
     var urlPath = req.url.split('?')[0];
@@ -96,6 +135,14 @@ http.createServer(function(req, res) {
             }).catch(function() { res.writeHead(500); res.end('{}'); });
             return;
         }
+    }
+    if (urlPath === '/v5-worker.js') {
+        // Prepend the fetch interceptor so core-in-worker addon requests are enriched.
+        return fs.readFile(path.join(wwwDir, 'v5-worker.js'), function(err, buf) {
+            if (err) { res.writeHead(404); return res.end(); }
+            res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+            res.end(FETCH_INTERCEPT + buf.toString());
+        });
     }
     if (urlPath === '/anime.html') {
         return fs.readFile(path.join(__dirname, 'anime.html'), function(err, buf) {
@@ -117,7 +164,9 @@ http.createServer(function(req, res) {
         return fs.readFile(idx, function(err, buf) {
             if (err) return proxyToStreaming(req, res);
             res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache, no-store, must-revalidate' });
-            res.end(buf);
+            // Inject the same fetch interceptor for main-thread requests.
+            var html = buf.toString().replace('<head>', '<head>\n    <script>' + FETCH_INTERCEPT + '</script>');
+            res.end(html);
         });
     }
     serveStatic(urlPath, res, function() { proxyToStreaming(req, res); });
