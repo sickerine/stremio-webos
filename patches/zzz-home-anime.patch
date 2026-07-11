@@ -1,0 +1,53 @@
+--- home.chunk.js	2026-07-11 00:29:14
++++ home.chunk.js	2026-07-11 00:29:14
+@@ -56,6 +56,30 @@
+                     }, K = async () => {
+                         localStorage.setItem("warningModalDismissed", "true"), G(!1)
+                     };
++                    // Anime schedule rows on Home: after Continue Watching, show the
++                    // same Top Airing + per-weekday rows the standalone Anime page
++                    // used (synthesized locally from /anime-airing/schedule-week,
++                    // re-bucketed at local midnight, refetched every 30 min).
++                    const [aCats, setACats] = (0, r.n5)([]);
++                    let aMetas = [], aToday = -1;
++                    const AWK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
++                    const aBuild = () => {
++                        const ms = aMetas;
++                        aToday = (new Date).getDay();
++                        const rows = [{ __anime: !0, title: "Top Airing", content: ms }];
++                        for (let n = 0; n < 7; n++) {
++                            const wd = (aToday + n) % 7,
++                                items = ms.filter((e => e.airingAt && (new Date(1e3 * e.airingAt)).getDay() === wd)).sort(((a, b) => a.airingAt - b.airingAt)),
++                                label = (0 === n ? "Today · " : 1 === n ? "Tomorrow · " : "") + AWK[wd];
++                            rows.push({ __anime: !0, title: label, content: items });
++                        }
++                        setACats(rows);
++                    };
++                    const aApply = e => { aMetas = e && e.metas || aMetas, aBuild() };
++                    ((typeof window < "u" && window.__animePreload) || fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json()))).then(aApply).catch((() => {}));
++                    const aT1 = setInterval((() => { aMetas.length && (new Date).getDay() !== aToday && aBuild() }), 6e4),
++                        aT2 = setInterval((() => { fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json())).then(aApply).catch((() => {})) }), 18e5);
++                    (0, r.Ki)((() => { clearInterval(aT1), clearInterval(aT2) }));
+                     return (0, r.EH)((() => {
+                         const e = b() - (N() ? 1 : 0);
+                         h((() => v.loadCatalogs(e)))
+@@ -101,7 +125,7 @@
+                                 get children() {
+                                     return (0, r.a0)(r.jK, {
+                                         get each() {
+-                                            return [N(), ...v.catalogs()].filter((e => null !== e))
++                                            return [N(), ...aCats()].filter((e => null !== e))
+                                         },
+                                         children: (e, t) => (0, r.a0)(s.WC, {
+                                             get catalog() {
+@@ -114,7 +138,9 @@
+                                             get autoFocus() {
+                                                 return b() === t
+                                             },
+-                                            showMore: !0,
++                                            get showMore() {
++                                                return !(e() && e().__anime)
++                                            },
+                                             onFocus: j,
+                                             onChange: H,
+                                             onSelect: D
