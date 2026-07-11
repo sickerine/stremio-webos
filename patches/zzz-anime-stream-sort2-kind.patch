@@ -1,6 +1,14 @@
 --- details.chunk.js	2026-07-11 00:29:14
 +++ details.chunk.js	2026-07-11 00:29:14
-@@ -248,7 +248,11 @@
+@@ -240,6 +240,7 @@
+             const U = O.A && O.A.locals ? O.A.locals : void 0;
+             var M = (0, r.vs)("<div>This addon did not return any content."),
+                 R = (0, r.vs)("<div>No addons were able to return any content."),
++                __NF = (0, r.vs)("<div>No streams in this category."),
+                 N = (0, r.vs)("<div>"),
+                 $ = (0, r.vs)("<div><div><div></div><div>");
+             const Q = e => {
+@@ -248,7 +249,11 @@
                      t: a
                  } = (0, m.B)(), d = (0, v.Vj)(), {
                      metaDetails: g
@@ -13,12 +21,10 @@
                      var n;
                      return e.addonsStreams.filter((({
                          addon: e
-@@ -306,6 +310,30 @@
-                             },
-                             autoFocus: !0,
+@@ -308,6 +313,30 @@
                              onChange: k
-+                        }), (0, i.a0)(i.wv, {
-+                            get when() {
+                         }), (0, i.a0)(i.wv, {
+                             get when() {
 +                                return __isKitsu()
 +                            },
 +                            get children() {
@@ -41,6 +47,25 @@
 +                                    onChange: __kSet
 +                                })
 +                            }
-                         }), (0, i.a0)(i.wv, {
-                             get when() {
++                        }), (0, i.a0)(i.wv, {
++                            get when() {
                                  return g.supportsRating() && "movie" === e.type
+                             },
+                             get children() {
+@@ -365,6 +394,16 @@
+                                                 onFocus: A
+                                             })
+                                         })
++                                    }
++                                }), (0, i.a0)(i.YG, {
++                                    get when() {
++                                        return !w().length && e.addonsStreams.some((({
++                                            content: e
++                                        }) => e && null != e.ready))
++                                    },
++                                    get children() {
++                                        var e = __NF();
++                                        return (0, i.gb)((() => (0, r.s7)(e, U.error))), e
+                                     }
+                                 }), (0, i.a0)(i.YG, {
+                                     get when() {
