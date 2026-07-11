@@ -27,7 +27,20 @@
                  item: "item-_uIl6",
                  poster: "poster-kFYpD",
                  square: "square-ellRR",
-@@ -1213,6 +1213,7 @@
+@@ -1203,7 +1203,11 @@
+             // countdown. Only items carrying an airingAt field (our synthesized
+             // rows) render it; every other MetaItem in the app is unaffected.
+             var __apTick = (0, o.n5)(Date.now());
+-            try { setInterval((function () { __apTick[1](Date.now()) }), 1e3) } catch (e) {}
++            var __apTick5 = (0, o.n5)(Date.now());
++            try {
++                setInterval((function () { __apTick[1](Date.now()) }), 1e3);
++                setInterval((function () { __apTick5[1](Date.now()) }), 5e3)
++            } catch (e) {}
+             function __apFmt(s) {
+                 if (s <= 0) return "airing now";
+                 var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), o = [];
+@@ -1213,6 +1217,7 @@
                  return "in " + o.join(" ");
              }
              var __apOv = (0, r.vs)("<div class=ap-ov><div class=ap-ov-ep></div><div class=ap-ov-cd></div>");
@@ -35,16 +48,16 @@
              const se = ["movies", "series", "channels", "tv"],
                  ce = e => {
                      const {
-@@ -1333,9 +1334,42 @@
+@@ -1333,14 +1338,52 @@
                                  }
                              }), (0, o.a0)(o.wv, {
                                  get when() {
 -                                    return e.item && e.item.airingAt
 +                                    // In-library indicator on browse cards (addon metas
 +                                    // only — library-backed cards have their own badges).
-+                                    return __apTick[0](), !n() && !a() && e.item && e.item.id && window.__inLibrary && window.__inLibrary(e.item.id)
-                                 },
-                                 get children() {
++                                    return __apTick5[0](), !n() && !a() && e.item && e.item.id && window.__inLibrary && window.__inLibrary(e.item.id)
++                                },
++                                get children() {
 +                                    var t = ie();
 +                                    return (0, r.Yr)(t, (0, o.a0)(P.A, {
 +                                        get class() {
@@ -65,21 +78,33 @@
 +                                            var s = e.item.airingAt - Math.floor(__apTick[0]() / 1e3);
 +                                            l += " · " + __apFmt(s)
 +                                        }
-+                                        nm.textContent = u.show || "";
-+                                        n.textContent = l;
-+                                        i.style.display = u.progress ? "" : "none";
-+                                        a.style.width = (u.progress || 0) + "%"
++                                        var sh = u.show || "";
++                                        nm.textContent !== sh && (nm.textContent = sh);
++                                        n.textContent !== l && (n.textContent = l);
++                                        var dp = u.progress ? "" : "none";
++                                        i.style.display !== dp && (i.style.display = dp);
++                                        var w = (u.progress || 0) + "%";
++                                        a.style.width !== w && (a.style.width = w)
 +                                    })), t
 +                                }
 +                            }), (0, o.a0)(o.wv, {
 +                                get when() {
 +                                    return e.item && e.item.airingAt && !e.item.nextUp
-+                                },
-+                                get children() {
+                                 },
+                                 get children() {
                                      var t = __apOv(), n = t.firstChild, i = n.nextSibling;
                                      return (0, o.EH)((function () {
                                          var a = e.item, l = Math.floor(__apTick[0]() / 1e3);
-@@ -1974,7 +2008,11 @@
+-                                        n.textContent = a.nextEpisode ? "EP " + a.nextEpisode + (a.totalEpisodes ? "/" + a.totalEpisodes : "") : "";
+-                                        i.textContent = __apFmt(a.airingAt - l)
++                                        var ep = a.nextEpisode ? "EP " + a.nextEpisode + (a.totalEpisodes ? "/" + a.totalEpisodes : "") : "";
++                                        var cd = __apFmt(a.airingAt - l);
++                                        n.textContent !== ep && (n.textContent = ep);
++                                        i.textContent !== cd && (i.textContent = cd)
+                                     })), t
+                                 }
+                             })]
+@@ -1974,7 +2017,11 @@
                                              get children() {
                                                  return [(0, o.a0)(o.YG, {
                                                      get when() {
@@ -92,7 +117,7 @@
                                                      },
                                                      get children() {
                                                          return (0, o.a0)(Me, {
-@@ -1983,7 +2021,8 @@
+@@ -1983,7 +2030,8 @@
                                                      }
                                                  }), (0, o.a0)(o.YG, {
                                                      get when() {
@@ -102,7 +127,7 @@
                                                      },
                                                      get children() {
                                                          return [(0, o.a0)(U, {
-@@ -3463,7 +3502,7 @@
+@@ -3463,7 +3511,7 @@
                  o = n.n(r),
                  i = n(3645),
                  a = n.n(i)()(o());
@@ -111,7 +136,7 @@
                  select: "select-MDSgl",
                  selected: "selected-ID7cq",
                  icon: "icon-KMvNx",
-@@ -3562,7 +3601,7 @@
+@@ -3562,7 +3610,7 @@
                  o = n.n(r),
                  i = n(3645),
                  a = n.n(i)()(o());
@@ -120,7 +145,7 @@
                  navbar: "navbar-NNb1c",
                  expanded: "expanded-RjhYX",
                  background: "background-xaXYe",
-@@ -4265,7 +4304,7 @@
+@@ -4265,7 +4313,7 @@
                  o = n.n(r),
                  i = n(3645),
                  a = n.n(i)()(o());
@@ -129,7 +154,7 @@
                  "floating-button": "floating-button-qY_0s",
                  left: "left-NN9mr",
                  right: "right-JpCg4",
-@@ -5875,7 +5914,7 @@
+@@ -5875,7 +5923,7 @@
                  c = new URL(n(6921), n.b),
                  u = a()(o()),
                  d = s()(c);
@@ -138,7 +163,7 @@
              const h = u
          },
          5486: e => {
-@@ -6126,7 +6165,7 @@
+@@ -6126,7 +6174,7 @@
                  o = n.n(r),
                  i = n(3645),
                  a = n.n(i)()(o());
@@ -147,7 +172,7 @@
                  "item-menu": "item-menu-Ty9h2",
                  backdrop: "backdrop-KaBa1",
                  content: "content-ACCI9",
-@@ -9755,7 +9794,7 @@
+@@ -9755,7 +9803,7 @@
                  o = n.n(r),
                  i = n(3645),
                  a = n.n(i)()(o());
@@ -156,7 +181,7 @@
                  menu: "menu-wrO8D",
                  heading: "heading-_TKTx",
                  title: "title-WzBAl",
-@@ -11517,6 +11556,14 @@
+@@ -11517,6 +11565,14 @@
                              var e, n;
                              return null !== (e = null === (n = t()) || void 0 === n ? void 0 : n.user) && void 0 !== e ? e : null
                          }));
@@ -171,7 +196,7 @@
                      return { ...e,
                          isAuthenticated: a,
                          user: s,
-@@ -11531,8 +11578,8 @@
+@@ -11531,8 +11587,8 @@
                          syncAddons: () => e.dispatchAction("PullAddonsFromAPI"),
                          syncLibrary: () => e.dispatchAction("SyncLibraryWithAPI"),
                          syncNotifications: () => e.dispatchAction("PullNotifications"),
