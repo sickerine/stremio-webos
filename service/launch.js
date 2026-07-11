@@ -107,6 +107,7 @@ var FETCH_INTERCEPT = [
     "          var ov=e.overview||e.description;",
     "          if(!v.overview&&ov){v.overview=ov;v.description=ov;}",
     "          if(!v.thumbnail&&e.thumbnail)v.thumbnail=e.thumbnail;",
+    "          if(e.released)v.released=e.released;",
     "          if(e.title&&!/^Episode \\d+$/i.test(e.title)&&(!v.title||/^Episode \\d+$/i.test(v.title)))v.title=e.title;",
     "        });",
     "        return new Response(JSON.stringify(kd),{status:200,headers:{'Content-Type':'application/json'}});",
