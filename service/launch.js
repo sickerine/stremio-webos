@@ -192,7 +192,8 @@ http.createServer(function(req, res) {
     if (urlPath === '/library-next') {
         // "Next Up" home row: last-interacted library series with the episode
         // to continue (progress) or watch next, sorted by newest aired episode.
-        var freshP = (Date.now() - libraryPulledAt > 60000) ? pullLibrary() : Promise.resolve();
+        var force = req.url.indexOf('fresh=1') >= 0;
+        var freshP = (force || Date.now() - libraryPulledAt > 60000) ? pullLibrary() : Promise.resolve();
         freshP.then(function () {
             return anilistAddon.buildNextUp(libraryItems);
         }).then(function (metas) {

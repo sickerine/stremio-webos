@@ -88,6 +88,9 @@
                 if (!id) return;
                 if (inLib) __libSet.add(id); else __libSet.delete(id);
                 try { fetch('/library-cache', { method: 'POST', body: JSON.stringify({ upsert: [{ id: id, removed: !inLib }] }) }).catch(function () {}); } catch (e) {}
+                // Let live views (Next Up row) react immediately. Delayed so the
+                // core has pushed the change to the account before we re-pull.
+                try { setTimeout(function () { window.dispatchEvent(new Event('libchange')); }, 1500); } catch (e) {}
             };
             window.__sortAnimeStreams = function (streams, kindArg) {
                 try {

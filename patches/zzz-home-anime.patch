@@ -1,6 +1,6 @@
 --- home.chunk.js	2026-07-11 00:29:14
 +++ home.chunk.js	2026-07-11 00:29:14
-@@ -56,6 +56,52 @@
+@@ -56,6 +56,53 @@
                      }, K = async () => {
                          localStorage.setItem("warningModalDismissed", "true"), G(!1)
                      };
@@ -39,7 +39,7 @@
 +                    const [nuState, setNuState] = (0, r.n5)(nuInit);
 +                    const nuRow = { __anime: !0, title: "Next Up", get content() { return nuState() } };
 +                    let nuKey = (typeof window < "u" && window.__nuKey) || "";
-+                    const nuPull = () => fetch("http://127.0.0.1:8081/library-next").then((e => e.json())).then((e => {
++                    const nuPull = (ev) => fetch("http://127.0.0.1:8081/library-next" + (ev ? "?fresh=1" : "")).then((e => e.json())).then((e => {
 +                        const ms = e && e.metas || [];
 +                        const key = JSON.stringify(ms.map((m => [m.id, m.poster, m.nextUp && m.nextUp.label, m.nextUp && m.nextUp.progress, m.airingAt])));
 +                        if (key !== nuKey || !Array.isArray(nuState())) {
@@ -49,11 +49,12 @@
 +                    })).catch((() => { Array.isArray(nuState()) || setNuState([]) }));
 +                    nuPull();
 +                    const nuT = setInterval(nuPull, 6e4);
-+                    (0, r.Ki)((() => { clearInterval(aT1), clearInterval(aT2), clearInterval(nuT) }));
++                    window.addEventListener("libchange", nuPull);
++                    (0, r.Ki)((() => { clearInterval(aT1), clearInterval(aT2), clearInterval(nuT), window.removeEventListener("libchange", nuPull) }));
                      return (0, r.EH)((() => {
                          const e = b() - (N() ? 1 : 0);
                          h((() => v.loadCatalogs(e)))
-@@ -101,7 +147,7 @@
+@@ -101,7 +148,7 @@
                                  get children() {
                                      return (0, r.a0)(r.jK, {
                                          get each() {
@@ -62,7 +63,7 @@
                                          },
                                          children: (e, t) => (0, r.a0)(s.WC, {
                                              get catalog() {
-@@ -114,7 +160,9 @@
+@@ -114,7 +161,9 @@
                                              get autoFocus() {
                                                  return b() === t
                                              },
