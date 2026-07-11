@@ -27,6 +27,123 @@ service.register('start', function(message) {
 // Static file serving
 var wwwDir = path.join(__dirname, 'www');
 
+// ---- True ASS subtitle pipeline ---------------------------------------------
+// Fansub MKVs carry full typeset ASS tracks + embedded fonts that the HLS
+// pipeline flattens to WebVTT. These endpoints extract the real thing with the
+// bundled ffmpeg so the page can render it via libass-wasm (SubtitlesOctopus):
+//   /ass/probe?u=    -> { subs:[{index,lang,title,default}], fonts:[names] }
+//   /ass/prepare?u=&idx= -> kicks font+track extraction; { ready, error }
+//   /ass/file?u=&idx=    -> the extracted .ass
+//   /ass/font?u=&f=      -> an extracted font file
+// ffmpeg reads through /ass/proxy (plain-HTTP localhost) so the bundled binary
+// never needs TLS; the proxy follows redirects and forwards Range requests.
+var cp = require('child_process');
+var crypto = require('crypto');
+var ASSDIR = '/tmp/asscache';
+try { fs.mkdirSync(ASSDIR); } catch (e) {}
+var FF = path.join(__dirname, 'bin', 'ffmpeg');
+var FFP = path.join(__dirname, 'bin', 'ffprobe');
+var assProbe = {};   // key -> {status, data}
+var assJobs = {};    // key-idx -> {status: pending|ready|error}
+function assKey(u) { return crypto.createHash('sha1').update(u).digest('hex').slice(0, 16); }
+function assProxyUrl(u) { return 'http://127.0.0.1:8081/ass/proxy?u=' + encodeURIComponent(u); }
+
+function assProxyHandler(req, res) {
+    var q = require('url').parse(req.url, true).query || {};
+    var target = q.u;
+    if (!target || !/^https?:\/\//.test(target)) { res.writeHead(400); return res.end(); }
+    var redirects = 0;
+    (function go(u) {
+        var lib = /^https:/.test(u) ? require('https') : require('http');
+        var pu = require('url').parse(u);
+        var headers = {};
+        if (req.headers.range) headers.Range = req.headers.range;
+        var up = lib.get({ hostname: pu.hostname, port: pu.port, path: pu.path, headers: headers }, function (ur) {
+            if (ur.statusCode >= 300 && ur.statusCode < 400 && ur.headers.location && redirects++ < 5) {
+                ur.resume();
+                return go(require('url').resolve(u, ur.headers.location));
+            }
+            var h = {};
+            ['content-length', 'content-range', 'accept-ranges', 'content-type'].forEach(function (k) {
+                if (ur.headers[k]) h[k] = ur.headers[k];
+            });
+            res.writeHead(ur.statusCode, h);
+            ur.pipe(res);
+        });
+        up.on('error', function () { try { res.writeHead(502); res.end(); } catch (e) {} });
+        req.on('close', function () { up.destroy(); });
+    })(target);
+}
+
+function assProbeHandler(req, res) {
+    var q = require('url').parse(req.url, true).query || {};
+    var u = q.u;
+    if (!u) { res.writeHead(400); return res.end('{}'); }
+    var key = assKey(u);
+    if (assProbe[key] && assProbe[key].status === 'ready') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(assProbe[key].data));
+    }
+    var out = '';
+    var p = cp.spawn(FFP, ['-v', 'error', '-print_format', 'json', '-show_streams', assProxyUrl(u)]);
+    p.stdout.on('data', function (d) { out += d; });
+    var to = setTimeout(function () { try { p.kill(); } catch (e) {} }, 30000);
+    p.on('close', function () {
+        clearTimeout(to);
+        var subs = [], fonts = [];
+        try {
+            (JSON.parse(out).streams || []).forEach(function (st) {
+                var t = st.tags || {};
+                if ('subtitle' === st.codec_type && /^(ass|ssa)$/.test(st.codec_name || ''))
+                    subs.push({ index: st.index, lang: t.language || '', title: t.title || '',
+                        def: (st.disposition || {}).default || 0 });
+                if ('attachment' === st.codec_type && /\.(ttf|otf|ttc)$/i.test(t.filename || ''))
+                    fonts.push(t.filename);
+            });
+        } catch (e) {}
+        var data = { subs: subs, fonts: fonts };
+        assProbe[key] = { status: 'ready', data: data };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+    });
+}
+
+function assPrepareHandler(req, res) {
+    var q = require('url').parse(req.url, true).query || {};
+    var u = q.u, idx = parseInt(q.idx, 10);
+    if (!u || isNaN(idx)) { res.writeHead(400); return res.end('{}'); }
+    var key = assKey(u), jk = key + '-' + idx;
+    var assFile = path.join(ASSDIR, jk + '.ass');
+    var fontDir = path.join(ASSDIR, key + '-fonts');
+    function respond() {
+        var st = assJobs[jk] || {};
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ready: 'ready' === st.status, error: 'error' === st.status }));
+    }
+    if (assJobs[jk]) return respond();
+    if (fs.existsSync(assFile)) { assJobs[jk] = { status: 'ready' }; return respond(); }
+    assJobs[jk] = { status: 'pending' };
+    try { fs.mkdirSync(fontDir); } catch (e) {}
+    // fonts: header-only read, quick
+    var fj = cp.spawn(FF, ['-v', 'error', '-y', '-dump_attachment:t', '', '-i', assProxyUrl(u), '-t', '0', '-f', 'null', '-'], { cwd: fontDir });
+    fj.on('error', function () {});
+    // the track itself: full demux, minutes at worst
+    var tmp = assFile + '.part';
+    var ej = cp.spawn(FF, ['-v', 'error', '-y', '-i', assProxyUrl(u), '-map', '0:' + idx, '-c', 'copy', '-f', 'ass', tmp]);
+    var eto = setTimeout(function () { try { ej.kill(); } catch (e) {} }, 10 * 60 * 1000);
+    ej.on('close', function (code) {
+        clearTimeout(eto);
+        try {
+            if (0 === code && fs.existsSync(tmp) && fs.statSync(tmp).size > 200) {
+                fs.renameSync(tmp, assFile);
+                assJobs[jk] = { status: 'ready' };
+            } else assJobs[jk] = { status: 'error' };
+        } catch (e) { assJobs[jk] = { status: 'error' }; }
+    });
+    ej.on('error', function () { assJobs[jk] = { status: 'error' }; });
+    respond();
+}
+
 // ---- Downscaling image proxy -------------------------------------------------
 // Full-size artwork (Kitsu originals, TVDB screencaps) is what lags the TV:
 // decode + composite cost scales with pixels. /img?w=<width>&u=<url> serves the
@@ -270,6 +387,36 @@ http.createServer(function(req, res) {
             }).catch(function() { res.writeHead(500); res.end('{}'); });
             return;
         }
+    }
+    if (urlPath === '/ass/proxy') return assProxyHandler(req, res);
+    if (urlPath === '/ass/probe') return assProbeHandler(req, res);
+    if (urlPath === '/ass/prepare') return assPrepareHandler(req, res);
+    if (urlPath === '/ass/file') {
+        var afq = require('url').parse(req.url, true).query || {};
+        var af = path.join(ASSDIR, assKey(afq.u || '') + '-' + parseInt(afq.idx, 10) + '.ass');
+        return fs.readFile(af, function (err, buf) {
+            if (err) { res.writeHead(404); return res.end(); }
+            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end(buf);
+        });
+    }
+    if (urlPath === '/ass/font') {
+        var fq = require('url').parse(req.url, true).query || {};
+        var ff = path.join(ASSDIR, assKey(fq.u || '') + '-fonts', path.basename(fq.f || ''));
+        return fs.readFile(ff, function (err, buf) {
+            if (err) { res.writeHead(404); return res.end(); }
+            res.writeHead(200, { 'Content-Type': 'font/ttf', 'Cache-Control': 'max-age=86400' });
+            res.end(buf);
+        });
+    }
+    if (urlPath.indexOf('/octopus/') === 0) {
+        var of_ = path.join(__dirname, 'octopus', path.basename(urlPath));
+        return fs.readFile(of_, function (err, buf) {
+            if (err) { res.writeHead(404); return res.end(); }
+            var ot = /\.wasm$/.test(of_) ? 'application/wasm' : 'application/javascript';
+            res.writeHead(200, { 'Content-Type': ot, 'Cache-Control': 'max-age=86400' });
+            res.end(buf);
+        });
     }
     if (urlPath === '/img') {
         var iq = require('url').parse(req.url, true).query || {};

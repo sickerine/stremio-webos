@@ -1,0 +1,12 @@
+--- player.chunk.js	2026-07-11 00:29:14
++++ player.chunk.js	2026-07-11 00:29:14
+@@ -1288,7 +1288,8 @@
+                         }) => b.eo.matches(e, t)));
+                         if (!be()) {
+                             const __et = l($e(), "eng"), __ea = l(_e(), "eng");
+-                            __et ? (C.selectSubtitlesTrack(__et), me(!0)) : __ea && (C.selectExtraSubtitlesTrack(__ea), me(!0))
++                            const __doSel = () => { __et ? (C.selectSubtitlesTrack(__et), me(!0)) : __ea && (C.selectExtraSubtitlesTrack(__ea), me(!0)) };
++                            window.__assPending ? window.__assOnResolve = __doSel : window.__assActive || __doSel()
+                         }
+                         if (!he())
+                             if (null != o && o.audioTrack) {
