@@ -110,6 +110,8 @@ var FETCH_INTERCEPT = [
     "          if(e.released){v.released=e.released;v.__aio=1;}",
     "          if(e.title&&!/^Episode \\d+$/i.test(e.title)&&(!v.title||/^Episode \\d+$/i.test(v.title)))v.title=e.title;",
     "        });",
+    "        var fbThumb=(kd.meta&&(kd.meta.background||kd.meta.poster))||null;",
+    "        if(fbThumb)vids.forEach(function(v){if(!v.thumbnail)v.thumbnail=fbThumb;});",
     "        var needSched=vids.some(function(v){return !v.__aio&&vids.length>1;});",
     "        var uniq={};vids.forEach(function(v){if(v.released)uniq[v.released]=1;});",
     "        if(!needSched&&Object.keys(uniq).length>1)return new Response(JSON.stringify(kd),{status:200,headers:{'Content-Type':'application/json'}});",
