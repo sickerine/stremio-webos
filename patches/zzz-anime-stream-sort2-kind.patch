@@ -1,0 +1,46 @@
+--- details.chunk.js	2026-07-11 00:29:14
++++ details.chunk.js	2026-07-11 00:29:14
+@@ -248,7 +248,11 @@
+                     t: a
+                 } = (0, m.B)(), d = (0, v.Vj)(), {
+                     metaDetails: g
+-                } = (0, o.gK)(), [h, f] = (0, s.ok)(), [p, b] = (0, i.n5)(null !== (n = h().addon) && void 0 !== n ? n : null), [x, y] = (0, i.n5)(parseInt(null !== (t = h().stream) && void 0 !== t ? t : "0")), w = () => (window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0()) : __w0()), __w0 = () => {
++                } = (0, o.gK)(), [h, f] = (0, s.ok)(), [p, b] = (0, i.n5)(null !== (n = h().addon) && void 0 !== n ? n : null), [x, y] = (0, i.n5)(parseInt(null !== (t = h().stream) && void 0 !== t ? t : "0")), [__kv, __ks] = (0, i.n5)(window.__animeStreamKind ? window.__animeStreamKind() : "all"), __isKitsu = () => {
++                    try { return /kitsu(:|%3A)\d+/i.test(location.hash || "") } catch (e) { return !1 }
++                }, __kSet = e => {
++                    window.__setAnimeStreamKind && window.__setAnimeStreamKind(e), __ks(e)
++                }, w = () => (__kv(), window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0()) : __w0()), __w0 = () => {
+                     var n;
+                     return e.addonsStreams.filter((({
+                         addon: e
+@@ -306,6 +310,30 @@
+                             },
+                             autoFocus: !0,
+                             onChange: k
++                        }), (0, i.a0)(i.wv, {
++                            get when() {
++                                return __isKitsu()
++                            },
++                            get children() {
++                                return (0, i.a0)(l.l6, {
++                                    get options() {
++                                        return [{
++                                            value: "all",
++                                            label: "All",
++                                            selected: "all" === __kv()
++                                        }, {
++                                            value: "seasonal",
++                                            label: "Seasonal",
++                                            selected: "seasonal" === __kv()
++                                        }, {
++                                            value: "bd",
++                                            label: "BD",
++                                            selected: "bd" === __kv()
++                                        }]
++                                    },
++                                    onChange: __kSet
++                                })
++                            }
+                         }), (0, i.a0)(i.wv, {
+                             get when() {
+                                 return g.supportsRating() && "movie" === e.type
