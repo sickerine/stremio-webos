@@ -17,16 +17,35 @@
 +                    try { return /kitsu(:|%3A)\d+/i.test(location.hash || "") } catch (e) { return !1 }
 +                }, __kSet = e => {
 +                    window.__setAnimeStreamKind && window.__setAnimeStreamKind(e), __ks(e)
-+                }, w = () => (__kv(), window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0()) : __w0()), __w0 = () => {
++                }, w = () => (window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0(), __kv()) : __w0()), __w0 = () => {
                      var n;
                      return e.addonsStreams.filter((({
                          addon: e
-@@ -308,6 +313,30 @@
-                             onChange: k
-                         }), (0, i.a0)(i.wv, {
-                             get when() {
+@@ -288,24 +293,30 @@
+                     },
+                     leave: ["left", "down"],
+                     get children() {
+-                        return [(0, i.a0)(l.l6, {
+-                            get options() {
+-                                return [{
+-                                    value: null,
+-                                    label: a("ALL_ADDONS"),
+-                                    selected: null === p()
+-                                }, ...e.addonsStreams.filter((({
+-                                    content: e
+-                                }) => null !== e.ready)).map((({
+-                                    addon: e
+-                                }) => ({
+-                                    value: e.transportUrl,
+-                                    label: e.manifest.name,
+-                                    selected: p() === e.transportUrl
+-                                })))]
++                        return [(0, i.a0)(i.wv, {
++                            get when() {
 +                                return __isKitsu()
-+                            },
+                             },
+-                            autoFocus: !0,
+-                            onChange: k
 +                            get children() {
 +                                return (0, i.a0)(l.l6, {
 +                                    get options() {
@@ -47,25 +66,23 @@
 +                                    onChange: __kSet
 +                                })
 +                            }
-+                        }), (0, i.a0)(i.wv, {
-+                            get when() {
+                         }), (0, i.a0)(i.wv, {
+                             get when() {
                                  return g.supportsRating() && "movie" === e.type
-                             },
-                             get children() {
-@@ -365,6 +394,16 @@
-                                                 onFocus: A
-                                             })
-                                         })
-+                                    }
-+                                }), (0, i.a0)(i.YG, {
-+                                    get when() {
-+                                        return !w().length && e.addonsStreams.some((({
+@@ -368,6 +379,16 @@
+                                     }
+                                 }), (0, i.a0)(i.YG, {
+                                     get when() {
++                                        return !w().length && (e.addonsStreams || []).some((({
 +                                            content: e
 +                                        }) => e && null != e.ready))
 +                                    },
 +                                    get children() {
 +                                        var e = __NF();
 +                                        return (0, i.gb)((() => (0, r.s7)(e, U.error))), e
-                                     }
-                                 }), (0, i.a0)(i.YG, {
-                                     get when() {
++                                    }
++                                }), (0, i.a0)(i.YG, {
++                                    get when() {
+                                         return null === (n = e.addonsStreams.find((({
+                                             addon: e
+                                         }) => p() === e.transportUrl))) || void 0 === n ? void 0 : n.content.error;
