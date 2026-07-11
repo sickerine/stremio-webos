@@ -1,0 +1,43 @@
+--- main.js	2026-07-11 00:29:14
++++ main.js	2026-07-11 00:29:14
+@@ -1198,6 +1198,21 @@
+             var ie = (0, r.vs)("<div>"),
+                 ae = (0, r.vs)("<div><div></div><div></div><div><div>"),
+                 le = (0, r.vs)("<div><div>");
++            // Live airing overlay for schedule items (our Anime page): a global
++            // 1s ticker signal + a poster-bottom template showing "EP x/y" and a
++            // countdown. Only items carrying an airingAt field (our synthesized
++            // rows) render it; every other MetaItem in the app is unaffected.
++            var __apTick = (0, o.n5)(Date.now());
++            try { setInterval((function () { __apTick[1](Date.now()) }), 1e3) } catch (e) {}
++            function __apFmt(s) {
++                if (s <= 0) return "airing now";
++                var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), o = [];
++                if (d) o.push(d + "d");
++                if (h) o.push(h + "h");
++                if (!d) o.push(m + "m");
++                return "in " + o.join(" ");
++            }
++            var __apOv = (0, r.vs)("<div class=ap-ov><div class=ap-ov-ep></div><div class=ap-ov-cd></div>");
+             const se = ["movies", "series", "channels", "tv"],
+                 ce = e => {
+                     const {
+@@ -1316,6 +1331,18 @@
+                                         name: "checkmark"
+                                     })), (0, o.gb)((() => (0, r.s7)(e, oe.watched))), e
+                                 }
++                            }), (0, o.a0)(o.wv, {
++                                get when() {
++                                    return e.item && e.item.airingAt
++                                },
++                                get children() {
++                                    var t = __apOv(), n = t.firstChild, i = n.nextSibling;
++                                    return (0, o.EH)((function () {
++                                        var a = e.item, l = Math.floor(__apTick[0]() / 1e3);
++                                        n.textContent = a.nextEpisode ? "EP " + a.nextEpisode + (a.totalEpisodes ? "/" + a.totalEpisodes : "") : "";
++                                        i.textContent = __apFmt(a.airingAt - l)
++                                    })), t
++                                }
+                             })]
+                         }
+                     })
