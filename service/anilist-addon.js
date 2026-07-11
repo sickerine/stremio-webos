@@ -123,6 +123,11 @@ function buildCatalog() {
                 return {
                     id: 'kitsu:' + r.kid,
                     type: 'series',
+                    // Marks our synthesized metas so the top preview keeps showing
+                    // this list metadata instead of upgrading to the Kitsu addon's
+                    // fetched meta (which differs and flickers). Detail page is
+                    // unaffected — it renders the canonical meta as usual.
+                    __ours: true,
                     // Detail-page deep link so the item popup's Play/Details
                     // buttons work (the app no-ops navigate(undefined) otherwise).
                     deepLinks: { metaDetailsVideos: '#/detail/series/kitsu:' + r.kid },
@@ -231,6 +236,11 @@ function search(query, page) {
                 return {
                     id: 'kitsu:' + r.kid,
                     type: 'series',
+                    // Marks our synthesized metas so the top preview keeps showing
+                    // this list metadata instead of upgrading to the Kitsu addon's
+                    // fetched meta (which differs and flickers). Detail page is
+                    // unaffected — it renders the canonical meta as usual.
+                    __ours: true,
                     // Detail-page deep link so the item popup's Play/Details
                     // buttons work (the app no-ops navigate(undefined) otherwise).
                     deepLinks: { metaDetailsVideos: '#/detail/series/kitsu:' + r.kid },
