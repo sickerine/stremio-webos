@@ -1,15 +1,14 @@
 --- main.js	2026-07-11 00:29:14
 +++ main.js	2026-07-11 00:29:14
-@@ -2307,6 +2307,12 @@
+@@ -2307,6 +2307,11 @@
                      path: "/home",
                      name: "home",
                      label: "STREMIO_TV_NAV_HOME"
 +                }, {
-+                    path: "/discover/http%3A%2F%2F127.0.0.1%3A8081%2Fanime-airing%2Fmanifest.json/series/anilist-airing",
++                    path: "/anime",
 +                    name: "anime",
 +                    label: "Anime",
-+                    icon: "tv-outline",
-+                    isFocused: e => "anilist-airing" === e.id
++                    icon: "tv-outline"
                  }, {
                      path: "/discover",
                      name: "discover",
