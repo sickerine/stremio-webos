@@ -13,6 +13,13 @@
 
 var https = require('https');
 
+// Route artwork through the local downscaling proxy (see launch.js /img):
+// full-size Kitsu/TVDB art is what lags the TV's decoder/compositor.
+function prox(u, w) {
+    if (!u || String(u).indexOf('/img?') >= 0) return u;
+    return 'http://127.0.0.1:8081/img?w=' + w + '&u=' + encodeURIComponent(u);
+}
+
 var CACHE_TTL_MS = 3 * 60 * 60 * 1000; // 3h — season lists barely change
 var cache = { at: 0, metas: null, inflight: null };
 
@@ -132,9 +139,9 @@ function buildCatalog() {
                     // buttons work (the app no-ops navigate(undefined) otherwise).
                     deepLinks: { metaDetailsVideos: '#/detail/series/kitsu:' + r.kid },
                     name: at.canonicalTitle || m.title.english || m.title.romaji,
-                    poster: (at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined,
+                    poster: prox((at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined, 320),
                     posterShape: 'poster',
-                    background: (at.coverImage && at.coverImage.original) || m.bannerImage || ci.extraLarge || undefined,
+                    background: prox((at.coverImage && at.coverImage.original) || m.bannerImage || ci.extraLarge || undefined, 1280),
                     description: at.synopsis || alDesc || undefined,
                     genres: (m.genres && m.genres.length) ? m.genres : undefined,
                     releaseInfo: (at.startDate ? at.startDate.slice(0, 4) : (m.seasonYear ? String(m.seasonYear) : undefined)),
@@ -245,9 +252,9 @@ function search(query, page) {
                     // buttons work (the app no-ops navigate(undefined) otherwise).
                     deepLinks: { metaDetailsVideos: '#/detail/series/kitsu:' + r.kid },
                     name: at.canonicalTitle || m.title.english || m.title.romaji,
-                    poster: (at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined,
+                    poster: prox((at.posterImage && (at.posterImage.large || at.posterImage.original)) || ci.extraLarge || ci.large || undefined, 320),
                     posterShape: 'poster',
-                    background: (at.coverImage && at.coverImage.original) || m.bannerImage || ci.extraLarge || undefined,
+                    background: prox((at.coverImage && at.coverImage.original) || m.bannerImage || ci.extraLarge || undefined, 1280),
                     description: at.synopsis || alDesc || undefined,
                     genres: (m.genres && m.genres.length) ? m.genres : undefined,
                     releaseInfo: (at.startDate ? at.startDate.slice(0, 4) : (m.seasonYear ? String(m.seasonYear) : undefined)),
@@ -375,7 +382,8 @@ function buildNextUp(libItems) {
                     return (v && v.thumbnail) || null;
                 });
             return thumbP.then(function (thumb) {
-                out.poster = thumb || meta.background || meta.poster || it.poster || undefined;
+                out.poster = prox(thumb || meta.background || meta.poster || it.poster || undefined, 480);
+                out.background = prox(out.background, 1280);
                 function epLabelOf(v) {
                     var ep = v.episode || parseInt(String(v.id).split(':').pop(), 10);
                     return (!isKitsu && null != v.season) ? ('S' + v.season + 'E' + ep) : ('EP ' + ep);

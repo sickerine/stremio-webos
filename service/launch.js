@@ -26,6 +26,56 @@ service.register('start', function(message) {
 
 // Static file serving
 var wwwDir = path.join(__dirname, 'www');
+
+// ---- Downscaling image proxy -------------------------------------------------
+// Full-size artwork (Kitsu originals, TVDB screencaps) is what lags the TV:
+// decode + composite cost scales with pixels. /img?w=<width>&u=<url> serves the
+// image resized via wsrv.nl (free resize CDN) and keeps a memory LRU so repeat
+// renders never leave the device. On any failure it 302s to the original.
+var IMG_WIDTHS = { '160': 1, '320': 1, '480': 1, '640': 1, '1280': 1 };
+var imgCache = {}, imgOrder = [], imgBytes = 0;
+function imgPut(k, buf, type) {
+    if (imgCache[k]) return;
+    imgCache[k] = { buf: buf, type: type || 'image/jpeg' };
+    imgOrder.push(k); imgBytes += buf.length;
+    while ((imgBytes > 24e6 || imgOrder.length > 300) && imgOrder.length) {
+        var old = imgOrder.shift();
+        if (imgCache[old]) { imgBytes -= imgCache[old].buf.length; delete imgCache[old]; }
+    }
+}
+function imgFetch(u, w, cb) {
+    var key = w + '|' + u;
+    if (imgCache[key]) return cb(null, imgCache[key]);
+    var https = require('https');
+    var req = https.get({
+        hostname: 'wsrv.nl',
+        path: '/?url=' + encodeURIComponent(u) + '&w=' + w + '&q=72&output=jpg',
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+    }, function (res) {
+        if (res.statusCode !== 200) { res.resume(); return cb(new Error('wsrv ' + res.statusCode)); }
+        var chunks = [];
+        res.on('data', function (d) { chunks.push(d); });
+        res.on('end', function () {
+            var buf = Buffer.concat(chunks);
+            imgPut(key, buf, res.headers['content-type']);
+            cb(null, imgCache[key] || { buf: buf, type: res.headers['content-type'] || 'image/jpeg' });
+        });
+    });
+    req.on('error', cb);
+    req.setTimeout(12000, function () { req.destroy(new Error('img timeout')); });
+}
+// Background prefetch with small concurrency, to warm the cache before render.
+function warmImages(urls, w) {
+    var q = urls.slice(0, 120), act = 0;
+    (function next() {
+        while (act < 4 && q.length) {
+            var u = q.shift();
+            if (!u || imgCache[w + '|' + u]) continue;
+            act++;
+            imgFetch(u, w, function () { act--; next(); });
+        }
+    })();
+}
 var libraryCache = {}; // id -> removed
 var libraryAuthKey = null;
 var libraryPullTimer = null;
@@ -133,7 +183,7 @@ var FETCH_INTERCEPT = [
     "      return Promise.resolve(new Response('{\"meta\":null}',{status:404,headers:{'Content-Type':'application/json'}}));",
     "    }",
     "    var m=/anime-kitsu\\.strem\\.fun\\/meta\\/(?:series|anime)\\/(kitsu(?::|%3A)\\d+)\\.json/i.exec(url);",
-    "    if(!m)return of(input,init);",
+    "    if(!m||g.__mergeOff)return of(input,init);",
     "    var kid;try{kid=decodeURIComponent(m[1]);}catch(e){kid=m[1];}",
     "    var hit=mergedCache[kid];",
     "    if(hit&&(Date.now()-hit.at)<6e5)return Promise.resolve(new Response(hit.body,{status:200,headers:{'Content-Type':'application/json'}}));",
@@ -159,6 +209,10 @@ var FETCH_INTERCEPT = [
     "        var uniq={};vids.forEach(function(v){if(v.released)uniq[v.released]=1;});",
     "        var done=function(){",
     "          vids.forEach(function(v){delete v.__aio;});",
+    "          var PX='http://127.0.0.1:8081/img?';",
+    "          vids.forEach(function(v){if(v.thumbnail&&v.thumbnail.indexOf('/img?')<0)v.thumbnail=PX+'w=320&u='+encodeURIComponent(v.thumbnail);});",
+    "          if(kd.meta&&kd.meta.background&&kd.meta.background.indexOf('/img?')<0)kd.meta.background=PX+'w=1280&u='+encodeURIComponent(kd.meta.background);",
+    "          vids.slice(0,40).forEach(function(v){if(v.thumbnail)of(v.thumbnail).catch(function(){});});",
     "          var body=JSON.stringify(kd);",
     "          mergedCache[kid]={at:Date.now(),body:body};",
     "          return new Response(body,{status:200,headers:{'Content-Type':'application/json'}});",
@@ -181,6 +235,21 @@ var FETCH_INTERCEPT = [
     "})();\n"
 ].join("\n");
 
+// Warm the proxy cache for every /img reference in a JSON body we just served,
+// so posters/stills are resized+cached before the TV asks for them.
+function warmFromBody(body) {
+    try {
+        var ms = String(body).match(/\/img\?w=(\d+)&u=([^"\\]+)/g) || [];
+        var by = {};
+        ms.forEach(function (m) {
+            var mm = /w=(\d+)&u=(.+)$/.exec(m);
+            if (!mm) return;
+            try { (by[mm[1]] = by[mm[1]] || []).push(decodeURIComponent(mm[2])); } catch (e) {}
+        });
+        Object.keys(by).forEach(function (w) { warmImages(by[w], w); });
+    } catch (e) {}
+}
+
 // Single server: static files first, then proxy to streaming server
 http.createServer(function(req, res) {
     var urlPath = req.url.split('?')[0];
@@ -197,9 +266,21 @@ http.createServer(function(req, res) {
                     'Cache-Control': 'no-cache'
                 });
                 res.end(r.body);
+                warmFromBody(r.body);
             }).catch(function() { res.writeHead(500); res.end('{}'); });
             return;
         }
+    }
+    if (urlPath === '/img') {
+        var iq = require('url').parse(req.url, true).query || {};
+        var iu = iq.u, iw = IMG_WIDTHS[iq.w] ? iq.w : '320';
+        if (!iu || !/^https?:\/\//.test(iu)) { res.writeHead(400); return res.end(); }
+        imgFetch(iu, iw, function (err, hit) {
+            if (err || !hit) { res.writeHead(302, { Location: iu }); return res.end(); }
+            res.writeHead(200, { 'Content-Type': hit.type, 'Cache-Control': 'max-age=86400' });
+            res.end(hit.buf);
+        });
+        return;
     }
     if (urlPath === '/library-next') {
         // "Next Up" home row: last-interacted library series with the episode
@@ -209,8 +290,10 @@ http.createServer(function(req, res) {
         freshP.then(function () {
             return anilistAddon.buildNextUp(libraryItems);
         }).then(function (metas) {
+            var lnBody = JSON.stringify({ metas: metas });
             res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
-            res.end(JSON.stringify({ metas: metas }));
+            res.end(lnBody);
+            warmFromBody(lnBody);
         }).catch(function () { res.writeHead(500); res.end('{"metas":[]}'); });
         return;
     }
