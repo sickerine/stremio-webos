@@ -152,6 +152,22 @@ http.createServer(function(req, res) {
             return;
         }
     }
+    if (urlPath === '/client-log') {
+        // Diagnostics: page JS errors + filter traces, readable over SSH.
+        if (req.method === 'POST') {
+            var body = '';
+            req.on('data', function (d) { body += d; });
+            req.on('end', function () {
+                try { fs.appendFileSync('/tmp/stremio-client.log', new Date().toISOString() + ' ' + body + '\n'); } catch (e) {}
+                res.writeHead(204); res.end();
+            });
+            return;
+        }
+        return fs.readFile('/tmp/stremio-client.log', function (err, buf) {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end(err ? '(empty)' : buf);
+        });
+    }
     if (urlPath === '/anime-search') {
         // Paginating anime search (AniList -> kitsu ids). Query: ?q=&page=
         var q = require('url').parse(req.url, true).query || {};

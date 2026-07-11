@@ -1,0 +1,24 @@
+--- main.js	2026-07-11 00:29:14
++++ main.js	2026-07-11 00:29:14
+@@ -1333,6 +1333,21 @@
+                                 }
+                             }), (0, o.a0)(o.wv, {
+                                 get when() {
++                                    // In-library indicator on browse cards (addon metas
++                                    // only — library-backed cards have their own badges).
++                                    return __apTick[0](), !n() && !a() && e.item && e.item.id && window.__inLibrary && window.__inLibrary(e.item.id)
++                                },
++                                get children() {
++                                    var t = ie();
++                                    return (0, r.Yr)(t, (0, o.a0)(P.A, {
++                                        get class() {
++                                            return oe["watched-icon"]
++                                        },
++                                        name: "library-outline"
++                                    })), (0, o.gb)((() => (0, r.s7)(t, oe.watched))), t
++                                }
++                            }), (0, o.a0)(o.wv, {
++                                get when() {
+                                     return e.item && e.item.airingAt
+                                 },
+                                 get children() {
