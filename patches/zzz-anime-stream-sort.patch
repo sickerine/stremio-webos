@@ -1,0 +1,11 @@
+--- details.chunk.js	2026-07-11 01:23:14
++++ details.chunk.js	2026-07-11 01:23:14
+@@ -352,7 +352,7 @@
+                                     get children() {
+                                         return (0, i.a0)(i.jK, {
+                                             get each() {
+-                                                return w()
++                                                return window.__sortAnimeStreams ? window.__sortAnimeStreams(w()) : w()
+                                             },
+                                             children: (e, n) => (0, i.a0)(V, {
+                                                 get stream() {

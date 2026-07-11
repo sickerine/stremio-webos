@@ -25,6 +25,23 @@
             var o = document.getElementById('__animeGrid');
             if (o) o.parentNode.removeChild(o);
         };
+        // For anime (kitsu ids) re-sort streams by seeders (health matters more
+        // than a mislabeled quality tag); everything else keeps Torrentio's
+        // default quality-first order.
+        window.__sortAnimeStreams = function (streams) {
+            try {
+                if (!streams || streams.length < 2) return streams;
+                var h = '';
+                try { h = decodeURIComponent(location.hash || ''); } catch (e) { h = location.hash || ''; }
+                if (h.indexOf('kitsu:') < 0 && h.indexOf('/detail/anime/') < 0) return streams;
+                var seed = function (s) {
+                    var t = (s && (s.title || s.description || s.name)) || '';
+                    var m = t.match(/👤\s*(\d+)/); // 👤 N
+                    return m ? parseInt(m[1], 10) : -1;
+                };
+                return streams.slice().sort(function (a, b) { return seed(b) - seed(a); });
+            } catch (e) { return streams; }
+        };
     </script>
     <script>
         if ('serviceWorker' in navigator) {
