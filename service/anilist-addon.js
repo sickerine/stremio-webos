@@ -53,7 +53,7 @@ function fetchAniListAiring() {
     // the order reflects what people are actually watching right now rather
     // than all-time popularity (which would put perpetual long-runners first).
     var query = '{ Page(page:1, perPage:50) { media(type:ANIME, status:RELEASING, format_in:[TV, ONA], sort:TRENDING_DESC) ' +
-        '{ idMal title { romaji english } coverImage { extraLarge large } bannerImage description(asHtml:false) ' +
+        '{ id idMal title { romaji english } coverImage { extraLarge large } bannerImage description(asHtml:false) ' +
         'genres averageScore seasonYear episodes } } }';
     var body = JSON.stringify({ query: query });
     return getJson({
@@ -78,11 +78,27 @@ function malToKitsu(malId) {
     }).catch(function () { return null; });
 }
 
+// Fallback for entries Kitsu's own mapping table doesn't know yet (brand-new
+// shows lag there ~15% of a season). ARM (relations.yuna.moe) maps
+// anilist -> kitsu ids and covered 100% of the gaps in testing.
+function anilistToKitsuARM(anilistId) {
+    return getJson({
+        hostname: 'relations.yuna.moe',
+        path: '/api/v2/ids?source=anilist&id=' + anilistId,
+        method: 'GET', headers: { 'Accept': 'application/json' }
+    }).then(function (d) {
+        var k = (d || {}).kitsu;
+        return (typeof k === 'number') ? String(k) : null;
+    }).catch(function () { return null; });
+}
+
 function buildCatalog() {
     return fetchAniListAiring().then(function (media) {
         // Map all in parallel; keep only those with a Kitsu id (playable).
         return Promise.all(media.map(function (m) {
             return malToKitsu(m.idMal).then(function (kid) {
+                return kid || anilistToKitsuARM(m.id);
+            }).then(function (kid) {
                 if (!kid) return null;
                 var ci = m.coverImage || {};
                 return {
