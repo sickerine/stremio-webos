@@ -22,3 +22,29 @@
                                      return e.item && e.item.airingAt
                                  },
                                  get children() {
+@@ -11517,6 +11532,14 @@
+                             var e, n;
+                             return null !== (e = null === (n = t()) || void 0 === n ? void 0 : n.user) && void 0 !== e ? e : null
+                         }));
++                    (0, r.EH)((() => {
++                        // Hand the account auth key to our local service so it can
++                        // pull the library (for the in-library poster indicator).
++                        try {
++                            var __k = t() && t().key;
++                            if (__k) fetch("http://127.0.0.1:8081/library-cache", { method: "POST", body: JSON.stringify({ authKey: __k }) }).catch((function () {}));
++                        } catch (e) {}
++                    }));
+                     return { ...e,
+                         isAuthenticated: a,
+                         user: s,
+@@ -11531,8 +11554,8 @@
+                         syncAddons: () => e.dispatchAction("PullAddonsFromAPI"),
+                         syncLibrary: () => e.dispatchAction("SyncLibraryWithAPI"),
+                         syncNotifications: () => e.dispatchAction("PullNotifications"),
+-                        addToLibrary: t => e.dispatchAction("AddToLibrary", t),
+-                        removeFromLibrary: t => e.dispatchAction("RemoveFromLibrary", t.id),
++                        addToLibrary: t => (window.__libMark && window.__libMark(t && (t.id || t._id), !0), e.dispatchAction("AddToLibrary", t)),
++                        removeFromLibrary: t => (window.__libMark && window.__libMark(t && t.id, !1), e.dispatchAction("RemoveFromLibrary", t.id)),
+                         rewindLibraryItem: t => e.dispatchAction("RewindLibraryItem", t.id),
+                         updateSettings: t => e.dispatchAction("UpdateSettings", { ...n(),
+                             ...t
