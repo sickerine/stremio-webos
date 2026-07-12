@@ -100,10 +100,14 @@ function assProbeHandler(req, res) {
                         def: (st.disposition || {}).default || 0 });
                 if ('attachment' === st.codec_type && /\.(ttf|otf|ttc)$/i.test(t.filename || ''))
                     fonts.push(t.filename);
-                if ('video' === st.codec_type && !data.fps && st.r_frame_rate) {
+                if ('video' === st.codec_type && !data.fpsNum && st.r_frame_rate) {
                     var fr = String(st.r_frame_rate).split('/');
-                    var fv = parseInt(fr[0], 10) / (parseInt(fr[1], 10) || 1);
-                    if (fv > 1 && fv < 121) data.fps = fv;
+                    var fn = parseInt(fr[0], 10), fd = parseInt(fr[1], 10) || 1;
+                    if (fn > 0 && fd > 0 && fn / fd > 1 && fn / fd < 121) {
+                        data.fpsNum = fn; data.fpsDen = fd; data.fps = fn / fd; // rational timebase (mpv model)
+                    }
+                    var stt = parseFloat(st.start_time);
+                    data.videoStart = isNaN(stt) ? 0 : stt;
                 }
             });
         } catch (e) {}
