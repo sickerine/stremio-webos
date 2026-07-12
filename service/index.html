@@ -223,7 +223,18 @@
                             }); } catch (e) {}
                             addL(v, 'loadedmetadata', fixSize);
                             st.sizeT = setInterval(fixSize, 4000);
-                            var fps0 = function () { return (probeData && probeData.fps) || 23.976; };
+                            // Rational video timebase (mpv model): frame index from
+                            // integer math, PTS reconstructed from the index (no float
+                            // accumulation drift), libass time = floor(pts*1000)/1000 ms
+                            // exactly as mpv's sd_ass conversion.
+                            var fpsNum = (probeData && probeData.fpsNum) || 24000;
+                            var fpsDen = (probeData && probeData.fpsDen) || 1001;
+                            var vStart = (probeData && probeData.videoStart) || 0;
+                            var ptsAt = function (t) {
+                                var fi = Math.floor((t - vStart) * fpsNum / fpsDen + 1e-7);
+                                var pts = vStart + fi * fpsDen / fpsNum;
+                                return Math.floor(pts * 1000 + 1e-6) / 1000;
+                            };
                             var renderAt = function (t) {
                                 if (st !== tok || !st.oct || !ready) return; // never demand pre-ready (paint-path race)
                                 var o = st.oct, w = v.videoWidth || 1920, hh = v.videoHeight || 1080;
@@ -272,9 +283,9 @@
                                 }
                             };
                             addL(v, 'playing', function () { clock.reanchor(); clock.running = true; clock.frozen = false; });
-                            addL(v, 'pause', function () { clock.running = false; clock.anchorMedia = v.currentTime; clock.anchorPerf = performance.now(); renderAt(Math.floor(v.currentTime * fps0() + 1e-6) / fps0() + 0.001); });
+                            addL(v, 'pause', function () { clock.running = false; clock.anchorMedia = v.currentTime; clock.anchorPerf = performance.now(); renderAt(ptsAt(v.currentTime)); });
                             addL(v, 'seeking', function () { clock.reanchor(); });
-                            addL(v, 'seeked', function () { clock.reanchor(); renderAt(Math.floor(v.currentTime * fps0() + 1e-6) / fps0() + 0.001); });
+                            addL(v, 'seeked', function () { clock.reanchor(); renderAt(ptsAt(v.currentTime)); });
                             addL(v, 'ratechange', function () { clock.reanchor(); });
                             addL(v, 'waiting', function () { clock.running = false; });
                             addL(v, 'ended', function () { clock.running = false; });
@@ -282,7 +293,6 @@
                             // snaps to VIDEO frame boundaries; render only when the frame
                             // index changes. Mid-frame sampling picks the ASS event that
                             // covers that video frame deterministically.
-                            var fps = (probeData && probeData.fps) || 23.976;
                             var lastFi = -1;
                             window.__assQuant = window.__assQuant !== false; // A/B toggle
                             (function frame() {
@@ -291,11 +301,16 @@
                                 if (clock.running && !v.seeking) {
                                     var lead = window.__assDelta != null ? window.__assDelta : 0.025;
                                     if (window.__assQuant) {
-                                        // schedule frame N 'lead' early; EVALUATE at frame N's
-                                        // start PTS (+1ms epsilon) — mid-frame sampling evaluates
-                                        // \move/\t half a frame ahead; real rVFC supplies frame PTS.
-                                        var fi = Math.floor((clock.now() + lead) * fps + 1e-6);
-                                        if (fi !== lastFi) { lastFi = fi; renderAt(fi / fps + 0.001); }
+                                        // lead selects WHICH frame to prepare (submission
+                                        // scheduling); the PTS handed to libass is that
+                                        // frame's exact rational timestamp, never shifted.
+                                        var target = clock.now() + lead;
+                                        var fi = Math.floor((target - vStart) * fpsNum / fpsDen + 1e-7);
+                                        if (fi !== lastFi) {
+                                            lastFi = fi;
+                                            var pts = vStart + fi * fpsDen / fpsNum;
+                                            renderAt(Math.floor(pts * 1000 + 1e-6) / 1000);
+                                        }
                                     } else renderAt(clock.now() + lead);
                                 }
                                 requestAnimationFrame(frame);
