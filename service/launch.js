@@ -194,6 +194,7 @@ function warmImages(urls, w) {
     })();
 }
 var libraryCache = {}; // id -> removed
+var clientLog = [];
 var libraryAuthKey = null;
 var libraryPullTimer = null;
 var libraryItems = [];   // full items incl. watch state, for /library-next
@@ -388,6 +389,21 @@ http.createServer(function(req, res) {
             return;
         }
     }
+    if (urlPath === '/client-log') {
+        if (req.method === 'POST') {
+            var clB = '';
+            req.on('data', function (d) { clB += d; });
+            req.on('end', function () {
+                clientLog.push(new Date().toISOString() + ' ' + clB);
+                if (clientLog.length > 300) clientLog.shift();
+                res.writeHead(204); res.end();
+            });
+            return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(clientLog.join('\n'));
+        return;
+    }
     if (urlPath === '/ass/proxy') return assProxyHandler(req, res);
     if (urlPath === '/ass/probe') return assProbeHandler(req, res);
     if (urlPath === '/ass/prepare') return assPrepareHandler(req, res);
@@ -413,7 +429,7 @@ http.createServer(function(req, res) {
         var of_ = path.join(__dirname, 'octopus', path.basename(urlPath));
         return fs.readFile(of_, function (err, buf) {
             if (err) { res.writeHead(404); return res.end(); }
-            var ot = /\.wasm$/.test(of_) ? 'application/wasm' : 'application/javascript';
+            var ot = /\.wasm$/.test(of_) ? 'application/wasm' : (/\.woff2$/.test(of_) ? 'font/woff2' : 'application/javascript');
             res.writeHead(200, { 'Content-Type': ot, 'Cache-Control': 'max-age=86400' });
             res.end(buf);
         });

@@ -26,6 +26,11 @@
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 .1rem .3rem rgba(0,0,0,.8); }
         .ap-nu-bar { width: 78%; height: .4rem; border-radius: .25rem; background: rgba(255,255,255,.18); overflow: hidden; }
         .ap-nu-in { height: 100%; width: 0; background: #7b5bf5; }
+        .JASSUB { position: fixed !important; top: 0 !important; left: 0 !important;
+            width: 100vw !important; height: 100vh !important; margin: 0 !important;
+            pointer-events: none !important; z-index: 2147482000 !important; }
+        .JASSUB canvas { position: absolute !important; top: 0 !important; left: 0 !important;
+            width: 100% !important; height: 100% !important; }
     </style>
     <script>
         // For anime (kitsu ids): filter streams by the entry's saved release
@@ -80,6 +85,10 @@
             __libPoll();
             setInterval(__libPoll, 10000);
             window.__inLibrary = function (id) { return __libSet.has(id); };
+            try {
+                var __ad = parseFloat(localStorage.getItem('assDelta'));
+                window.__assDelta = isNaN(__ad) ? 0.025 : __ad; // 25ms = expected compositor budget (research)
+            } catch (e) { window.__assDelta = 0.025; }
             // Instant local update when the app adds/removes on THIS device (the
             // 10s poll only catches other devices / the initial pull). Also
             // persists the change to the service cache so other pages/restarts
@@ -122,6 +131,10 @@
         // selection when the file has no ASS or extraction fails.
         (function () {
             var st = null;
+            function alog(m) { try { fetch('/client-log', { method: 'POST', body: 'ASS ' + m }); } catch (e) {} }
+            window.addEventListener('error', function (e) {
+                alog('PAGE-ERROR ' + (e.message || '') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || ''));
+            });
             function playerHash() {
                 var h = '';
                 try { h = decodeURIComponent(location.hash || ''); } catch (e) { h = location.hash || ''; }
@@ -149,8 +162,9 @@
             }
             function stop() {
                 if (st) {
-                    if (st.oct) { try { st.oct.dispose(); } catch (e) {} }
-                    clearInterval(st.poll); clearTimeout(st.t);
+                    if (st.cleanup) st.cleanup.forEach(function (f) { try { f(); } catch (e) {} });
+                    if (st.oct) { try { (st.oct.destroy || st.oct.dispose).call(st.oct); } catch (e) {} }
+                    clearInterval(st.poll); clearTimeout(st.t); clearInterval(st.sizeT); clearInterval(st.drive);
                     st = null;
                 }
                 window.__assPending = false; window.__assActive = false; window.__assOnResolve = null;
@@ -166,19 +180,121 @@
                 var fonts = (probe.fonts || []).map(function (f) {
                     return location.origin + '/ass/font?u=' + encodeURIComponent(st.mediaUrl) + '&f=' + encodeURIComponent(f);
                 });
-                loadScript('/octopus/subtitles-octopus.js', function (err) {
-                    if (err || !st || !window.SubtitlesOctopus) return;
-                    try {
-                        st.oct = new SubtitlesOctopus({
-                            video: v,
-                            subUrl: location.origin + '/ass/file?' + q,
-                            fonts: fonts,
-                            workerUrl: '/octopus/subtitles-octopus-worker.js',
-                            prescaleFactor: 0.8,
-                            targetFps: 30
-                        });
-                    } catch (e) {}
-                });
+                fetch(location.origin + '/ass/file?' + q).then(function (r) { return r.text(); }).then(function (assText) {
+                    if (!st) return;
+                    loadScript('/octopus/jassub.bundle.js', function () {
+                        if (!st || 'function' !== typeof window.JASSUB) { alog('jassub ctor missing'); return; }
+                        try {
+                            st.oct = new JASSUB({
+                                video: v,
+                                subContent: assText,
+                                fonts: fonts,
+                                fallbackFont: location.origin + '/octopus/default.woff2',
+                                workerUrl: '/octopus/jassub-worker.js',
+                                wasmUrl: '/octopus/jassub-worker.wasm',
+                                blendMode: 'wasm',
+                                asyncRender: false,
+                                prescaleFactor: 1,
+                                prescaleHeightLimit: 1080,
+                                maxRenderHeight: 0
+                            });
+                            alog('jassub constructed asslen=' + assText.length);
+                            // Render the subtitle buffer at a fraction of the video
+                            // resolution (CSS upscales it to fullscreen). Fewer pixels
+                            // for libass to rasterize each frame => smoother animation
+                            // on this single-threaded TV. Tune ASS_SCALE 0.5..1.0.
+                            // ---- lifecycle-safe wiring (audit fix): every listener is
+                            // tracked and removed in stop(); loops die with this instance.
+                            var gen = st;
+                            st.cleanup = [];
+                            var addL = function (tgt, ev, fn) {
+                                tgt.addEventListener(ev, fn);
+                                st.cleanup.push(function () { tgt.removeEventListener(ev, fn); });
+                            };
+                            // Designed resize path: real video dims; JASSUB derives the
+                            // render buffer internally (placement-exact at any scale).
+                            var fixSize = function () {
+                                if (st !== gen || !st.oct) return;
+                                try {
+                                    st.oct._videoWidth = v.videoWidth || 1920;
+                                    st.oct._videoHeight = v.videoHeight || 1080;
+                                    st.oct.resize();
+                                } catch (e) {}
+                            };
+                            try { st.oct.addEventListener('ready', function () { alog('jassub READY-event'); fixSize(); setTimeout(fixSize, 800); }); } catch (e) {}
+                            addL(v, 'loadedmetadata', fixSize);
+                            addL(v, 'play', fixSize);
+                            st.sizeT = setInterval(fixSize, 4000);
+                            var renderAt = function (t) {
+                                if (st !== gen || !st.oct) return;
+                                var o = st.oct, w = v.videoWidth || 1920, hh = v.videoHeight || 1080;
+                                if (o.busy) o._lastDemandTime = { mediaTime: t, width: w, height: hh };
+                                else { o.busy = true; o._demandRender({ mediaTime: t, width: w, height: hh }); }
+                            };
+                            // ---- transition-anchored clock (research round 3 final form):
+                            // anchor only when the 200ms-quantized currentTime TICKS
+                            // (midpoint-timestamped, stale-frame rejected), PLL between
+                            // ticks, consecutive-innovation re-anchor, stall watchdog.
+                            var Q = 0.2; // measured currentTime quantum on this TV
+                            var clock = {
+                                anchorMedia: v.currentTime, anchorPerf: performance.now(),
+                                rate: v.playbackRate || 1, running: !v.paused,
+                                lastObserved: v.currentTime, pending: true, frozen: false,
+                                lastRaf: performance.now(), lastTrans: performance.now(), innovPrev: 0,
+                                now: function () {
+                                    var d = window.__assDelta != null ? window.__assDelta : 0.025;
+                                    if (!this.running) return this.anchorMedia + d;
+                                    return this.anchorMedia + (performance.now() - this.anchorPerf) / 1000 * this.rate + d;
+                                },
+                                reanchor: function () {
+                                    this.rate = v.playbackRate || 1;
+                                    this.anchorMedia = v.currentTime + 0.5 * Q * this.rate; // mid-phase provisional
+                                    this.anchorPerf = performance.now();
+                                    this.lastObserved = v.currentTime;
+                                    this.pending = true; this.innovPrev = 0;
+                                    this.lastTrans = performance.now();
+                                },
+                                observe: function () {
+                                    var w = performance.now(), rafGap = w - this.lastRaf;
+                                    this.lastRaf = w;
+                                    var o = v.currentTime;
+                                    if (o === this.lastObserved) {
+                                        // stall watchdog: clock quantum is 200ms; silence >450ms = stalled
+                                        if (this.running && w - this.lastTrans > 450) { this.running = false; this.frozen = true; }
+                                        return;
+                                    }
+                                    this.lastObserved = o; this.lastTrans = w;
+                                    if (this.frozen) { this.frozen = false; this.running = !v.paused; this.pending = true; }
+                                    if (rafGap > 80) return; // stale rAF: transition timestamp unreliable
+                                    var tw = w - rafGap / 2;  // midpoint timestamping (halves detection bias)
+                                    if (this.pending) { this.anchorMedia = o; this.anchorPerf = tw; this.pending = false; this.innovPrev = 0; return; }
+                                    var err = o - (this.anchorMedia + (tw - this.anchorPerf) / 1000 * this.rate);
+                                    if (Math.abs(err) > 0.3 ||
+                                        (Math.abs(err) > 0.06 && this.innovPrev * err > 0 && Math.abs(this.innovPrev) > 0.06)) {
+                                        this.anchorMedia = o; this.anchorPerf = tw; this.innovPrev = 0; // discontinuity
+                                    } else { this.anchorMedia += 0.12 * err; this.innovPrev = err; }
+                                }
+                            };
+                            addL(v, 'playing', function () { clock.reanchor(); clock.running = true; clock.frozen = false; });
+                            addL(v, 'pause', function () { clock.running = false; clock.anchorMedia = v.currentTime; clock.anchorPerf = performance.now(); renderAt(v.currentTime); });
+                            addL(v, 'seeking', function () { clock.reanchor(); });
+                            addL(v, 'seeked', function () { clock.reanchor(); renderAt(v.currentTime); });
+                            addL(v, 'ratechange', function () { clock.reanchor(); });
+                            addL(v, 'waiting', function () { clock.running = false; });
+                            addL(v, 'ended', function () { clock.running = false; });
+                            (function frame() {
+                                if (st !== gen) return;
+                                clock.observe();
+                                if (clock.running && !v.seeking) renderAt(clock.now());
+                                requestAnimationFrame(frame);
+                            })();
+                            try { st.oct.addEventListener('ready', function () { alog('jassub READY-event'); fixSize(); setTimeout(fixSize, 800); }); } catch (e) {}
+                            v.addEventListener('loadedmetadata', fixSize);
+                            v.addEventListener('play', fixSize);
+                            st.sizeT = setInterval(fixSize, 4000);
+                        } catch (e) { alog('jassub ctor THREW ' + (e && e.message)); }
+                    });
+                }).catch(function (e) { alog('ass fetch failed ' + (e && e.message)); });
             }
             function begin(key) {
                 st = { key: key, oct: null };
@@ -187,15 +303,17 @@
                 st.poll = setInterval(function () {
                     if (!st || st.key !== key) return;
                     var mu = findMediaUrl();
-                    if (!mu) { if (++tries > 60) { clearInterval(st.poll); resolveNoAss(); } return; }
+                    if (!mu) { if (++tries > 60) { clearInterval(st.poll); alog('mediaUrl TIMEOUT'); resolveNoAss(); } return; }
                     clearInterval(st.poll);
                     st.mediaUrl = mu;
+                    alog('mediaUrl ' + mu.slice(0, 90));
                     fetch('/ass/probe?u=' + encodeURIComponent(mu)).then(function (r) { return r.json(); }).then(function (p) {
                         if (!st || st.key !== key) return;
                         var eng = (p.subs || []).filter(function (s) { return /^en/i.test(s.lang || ''); });
                         var pick = eng.find(function (s) { return /full|dialog/i.test(s.title || ''); })
                             || eng.find(function (s) { return !/sign|song/i.test(s.title || ''); })
                             || eng[0];
+                        alog('probe subs=' + (p.subs || []).length + ' pick=' + (pick ? pick.index + ':' + pick.title : 'none'));
                         if (!pick) return resolveNoAss();
                         window.__assActive = true; window.__assPending = false;
                         var q = 'u=' + encodeURIComponent(mu) + '&idx=' + pick.index;
@@ -203,8 +321,8 @@
                             if (!st || st.key !== key) return;
                             fetch('/ass/prepare?' + q).then(function (r) { return r.json(); }).then(function (d) {
                                 if (!st || st.key !== key) return;
-                                if (d.ready) start(q, p);
-                                else if (d.error) resolveNoAss();
+                                if (d.ready) { alog('prepare ready'); start(q, p); }
+                                else if (d.error) { alog('prepare ERROR'); resolveNoAss(); }
                                 else st.t = setTimeout(waitReady, 3000);
                             }).catch(function () { st.t = setTimeout(waitReady, 5000); });
                         })();
