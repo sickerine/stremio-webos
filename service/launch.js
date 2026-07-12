@@ -91,6 +91,7 @@ function assProbeHandler(req, res) {
     p.on('close', function () {
         clearTimeout(to);
         var subs = [], fonts = [];
+        var data = { subs: subs, fonts: fonts };
         try {
             (JSON.parse(out).streams || []).forEach(function (st) {
                 var t = st.tags || {};
@@ -99,9 +100,13 @@ function assProbeHandler(req, res) {
                         def: (st.disposition || {}).default || 0 });
                 if ('attachment' === st.codec_type && /\.(ttf|otf|ttc)$/i.test(t.filename || ''))
                     fonts.push(t.filename);
+                if ('video' === st.codec_type && !data.fps && st.r_frame_rate) {
+                    var fr = String(st.r_frame_rate).split('/');
+                    var fv = parseInt(fr[0], 10) / (parseInt(fr[1], 10) || 1);
+                    if (fv > 1 && fv < 121) data.fps = fv;
+                }
             });
         } catch (e) {}
-        var data = { subs: subs, fonts: fonts };
         assProbe[key] = { status: 'ready', data: data };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(data));
