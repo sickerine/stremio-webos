@@ -406,6 +406,31 @@ function buildNextUp(libItems) {
     });
 }
 
+// ---- Subtitle season/episode remap --------------------------------------
+// The anime-kitsu addon translates kitsu:ID:EP to IMDB naively by Kitsu's
+// season ordinal, which is wrong wherever Kitsu and IMDB split seasons
+// differently (kitsu:44081:9 -> tt9335498:3:9 = Swordsmith ep 9 instead of
+// Yuukaku ep 9 = S2E16). AIOMetadata's franchise meta carries the CORRECT
+// TVDB/IMDB (season, episode) per kitsu video id; map through it.
+function subMap(sid) {
+    var m = /^kitsu:(\d+):(\d+)$/.exec(sid);
+    if (!m) return Promise.resolve(null);
+    return fetchAIOMeta('kitsu:' + m[1]).then(function (meta) {
+        if (!meta) return null;
+        var vids = meta.videos || [];
+        var v = null;
+        for (var i = 0; i < vids.length; i++) if (vids[i].id === sid) { v = vids[i]; break; }
+        if (!v || null == v.season || null == v.episode) return null;
+        var tt = (meta.imdb_id && /^tt/.test(meta.imdb_id)) ? meta.imdb_id : null;
+        if (!tt) for (var j = 0; j < vids.length; j++) {
+            var idj = String(vids[j].id || '');
+            if (/^tt\d+/.test(idj)) { tt = idj.split(':')[0]; break; }
+        }
+        if (!tt) return null;
+        return tt + ':' + v.season + ':' + v.episode;
+    }).catch(function () { return null; });
+}
+
 var MANIFEST = {
     id: 'io.stremio.patched.anilist',
     version: '1.0.0',
@@ -439,4 +464,4 @@ function handle(pathname) {
     return null;
 }
 
-module.exports = { handle: handle, MANIFEST: MANIFEST, _buildCatalog: buildCatalog, search: search, buildNextUp: buildNextUp };
+module.exports = { handle: handle, MANIFEST: MANIFEST, _buildCatalog: buildCatalog, search: search, buildNextUp: buildNextUp, subMap: subMap, fetchSeriesMeta: fetchSeriesMeta };

@@ -38,6 +38,8 @@ build: service/server.js service/bin/ffmpeg service/bin/ffprobe
 		echo "    Applying $$(basename $$p)..."; \
 		patch -p0 -d service/www < "$$p"; \
 	done
+	@echo "==> Overlay: custom subtitle renderer (forked JASSUB + ass-controller)..."
+	@cp -R service/overlay/. service/www/
 	@echo "==> OLED pass: true-black background..."
 	@perl -pi -e 's/#0c0c10/#000000/g; s/rgba\(12, 12, 16/rgba(0, 0, 0/g' service/www/*.js service/www/index.html
 	@echo "==> Build complete"
