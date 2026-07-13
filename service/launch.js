@@ -7,6 +7,8 @@ var fs = require('fs');
 var path = require('path');
 var Service = require('webos-service');
 var anilistAddon = require('./anilist-addon.js');
+var assExtract = require('./ass-extract.js');
+var assTee = require('./ass-tee.js');
 
 var service = new Service('io.stremio.patched.server');
 var ready = false;
@@ -211,11 +213,12 @@ var FETCH_INTERCEPT = [
     "        var done=function(){",
     "          vids.forEach(function(v){delete v.__aio;});",
     "          var PX='http://127.0.0.1:8081/img?';",
-    "          vids.forEach(function(v){if(v.thumbnail&&v.thumbnail.indexOf('/img?')<0)v.thumbnail=PX+'w=320&u='+encodeURIComponent(v.thumbnail);});",
-    "          if(kd.meta&&kd.meta.background&&kd.meta.background.indexOf('/img?')<0)kd.meta.background=PX+'w=1280&u='+encodeURIComponent(kd.meta.background);",
+    "          vids.forEach(function(v){if(v.thumbnail&&v.thumbnail.indexOf('/img?')<0)v.thumbnail=PX+'w=200&u='+encodeURIComponent(v.thumbnail);});",
+    "          if(kd.meta&&kd.meta.background&&kd.meta.background.indexOf('/img?')<0)kd.meta.background=PX+'w=640&u='+encodeURIComponent(kd.meta.background);",
     "          vids.slice(0,40).forEach(function(v){if(v.thumbnail)of(v.thumbnail).catch(function(){});});",
     "          var body=JSON.stringify(kd);",
     "          mergedCache[kid]={at:Date.now(),body:body};",
+    "          var _mk=Object.keys(mergedCache);if(_mk.length>12){_mk.sort(function(a,b){return mergedCache[a].at-mergedCache[b].at;});while(_mk.length>12){delete mergedCache[_mk.shift()];}}",
     "          return new Response(body,{status:200,headers:{'Content-Type':'application/json'}});",
     "        };",
     "        if(!needSched&&Object.keys(uniq).length>1)return done();",
@@ -354,6 +357,148 @@ http.createServer(function(req, res) {
             'Cache-Control': 'no-cache, no-store, must-revalidate'
         });
         res.end(SELF_DESTRUCT_SW);
+        return;
+    }
+    // ---- P0 ASS-rendering probe harness (see docs/ASS-SUBTITLE-RENDERING-PLAN.md) ----
+    // Diagnostic only; ships inert unless service/ass-probe.js is present and the
+    // <script src="/ass-probe.js"> tag is in index.html.
+    if (urlPath === '/ass-probe.js') {
+        return fs.readFile(path.join(__dirname, 'ass-probe.js'), function (err, buf) {
+            if (err) { res.writeHead(404); return res.end('// ass-probe.js absent'); }
+            res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+            res.end(buf);
+        });
+    }
+    if (urlPath === '/client-log') {
+        // Sink for on-device probe output: append raw JSON to a pullable log and
+        // echo to the service console (journald). POST only.
+        if (req.method !== 'POST') { res.writeHead(405); return res.end(); }
+        var clBody = '';
+        req.on('data', function (d) { clBody += d; if (clBody.length > 4e6) req.destroy(); });
+        req.on('end', function () {
+            var line = new Date().toISOString() + ' ' + clBody + '\n';
+            try { console.log('[client-log] ' + clBody.slice(0, 2000)); } catch (e) {}
+            try { fs.appendFile('/tmp/stremio-ass-probe.log', line, function () {}); } catch (e) {}
+            res.writeHead(204); res.end();
+        });
+        return;
+    }
+    if (urlPath === '/probe-codec') {
+        // Run ffprobe on the media URL and return the video stream's codec facts
+        // (Probe D). Reads only headers/first packets over the network — no transcode.
+        var pcq = require('url').parse(req.url, true).query || {};
+        var pcu = pcq.u;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-cache');
+        if (!pcu || !/^https?:\/\//.test(pcu)) { res.writeHead(400); return res.end('{"error":"bad url"}'); }
+        var ffprobe = process.env.FFPROBE_BIN || path.join(__dirname, 'bin', 'ffprobe');
+        var args = ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
+            'stream=codec_name,profile,pix_fmt,bits_per_raw_sample,width,height',
+            '-of', 'json', pcu];
+        var cp;
+        try { cp = require('child_process').spawn(ffprobe, args, { timeout: 20000 }); }
+        catch (e) { res.writeHead(500); return res.end(JSON.stringify({ error: String(e && e.message || e) })); }
+        var pcOut = '', pcErr = '';
+        cp.stdout.on('data', function (d) { pcOut += d; });
+        cp.stderr.on('data', function (d) { pcErr += d; });
+        cp.on('error', function (e) { res.writeHead(500); res.end(JSON.stringify({ error: String(e && e.message || e) })); });
+        cp.on('close', function () {
+            try {
+                var st = (JSON.parse(pcOut).streams || [])[0] || {};
+                res.writeHead(200); res.end(JSON.stringify(st));
+            } catch (e) {
+                res.writeHead(200); res.end(JSON.stringify({ error: 'ffprobe parse: ' + (pcErr || pcOut).slice(0, 200) }));
+            }
+        });
+        return;
+    }
+    // ---- Streaming subtitle pipeline (see ass-controller.js + ass-extract.js) ----
+    // /ass/prepare?u=<mediaUrl>[&t=<seconds>]  -> open a playhead-following demux
+    //   session at play position `t`; returns { state, key, ass, fonts, coveredTo }.
+    if (urlPath === '/ass/prepare') {
+        var apq = require('url').parse(req.url, true).query || {};
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-cache');
+        if (!apq.u || !/^https?:\/\//.test(apq.u)) { res.writeHead(400); return res.end('{"error":"bad url"}'); }
+        var st = assExtract.prepare(apq.u, parseFloat(apq.t) || 0);
+        res.writeHead(200); return res.end(JSON.stringify(st));
+    }
+    // /ass/status?key=<key>[&t=<seconds>][&seek=1]  -> feed the playhead (seek=1
+    //   re-anchors the window) and return session status.
+    if (urlPath === '/ass/status') {
+        var asq = require('url').parse(req.url, true).query || {};
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-cache');
+        var st2;
+        if (asq.t != null) st2 = assExtract.tick(asq.key || '', parseFloat(asq.t) || 0, asq.seek === '1');
+        else st2 = assExtract.status(asq.key || '');
+        res.writeHead(200); return res.end(JSON.stringify(st2));
+    }
+    // /ass/get?key=<key>  -> the current accumulated ASS track (in-memory, grows).
+    if (urlPath === '/ass/get') {
+        var agq = require('url').parse(req.url, true).query || {};
+        var body = assExtract.track(agq.key || '');
+        if (!body) { res.writeHead(404); return res.end('not ready'); }
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' });
+        return res.end(body);
+    }
+    if (urlPath === '/ass/font') {
+        var afq = require('url').parse(req.url, true).query || {};
+        return fs.readFile(assExtract.fontPath(afq.key || '', afq.f || ''), function (err, buf) {
+            if (err) { res.writeHead(404); return res.end(); }
+            res.writeHead(200, { 'Content-Type': 'font/ttf', 'Cache-Control': 'max-age=604800' });
+            res.end(buf);
+        });
+    }
+    // ---- Single-download tee (ass-tee.js): the player streams THROUGH the tee,
+    //   which demuxes subs from the same bytes. These serve the accumulated track.
+    //   ?u=<cdnUrl> (the real media url the tee is teeing).
+    if (urlPath === '/ass/track') {   // status
+        var atq = require('url').parse(req.url, true).query || {};
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-cache');
+        res.writeHead(200); return res.end(JSON.stringify(assTee.status(atq.u || '')));
+    }
+    if (urlPath === '/ass/tget') {     // one track's ASS text  ?u=&trk=<index>[&t=<sec>&w=<winSec>]
+        var gtq = require('url').parse(req.url, true).query || {};
+        var _t = gtq.t != null ? parseFloat(gtq.t) : null, _w = gtq.w != null ? parseFloat(gtq.w) : 0;
+        var t = assTee.trackText(gtq.u || '', parseInt(gtq.trk, 10) || 0, isFinite(_t) ? _t : null, isFinite(_w) ? _w : 0);
+        if (!t) { res.writeHead(404); return res.end('not ready'); }
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' });
+        return res.end(t);
+    }
+    if (urlPath === '/ass/tfont') {    // embedded font bytes
+        var tfq = require('url').parse(req.url, true).query || {};
+        var fb = assTee.fontData(tfq.u || '', tfq.f || '');
+        if (!fb) { res.writeHead(404); return res.end(); }
+        res.writeHead(200, { 'Content-Type': 'font/ttf', 'Cache-Control': 'max-age=604800' });
+        return res.end(fb);
+    }
+    // /anime-streams?cfg=<torrentioConfig>&id=<kitsu:44081:10>  -> torrentio stream list
+    //   (replicates what the core does; cfg carries the user's torbox token).
+    if (urlPath === '/anime-streams') {
+        var stq = require('url').parse(req.url, true).query || {};
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-cache');
+        if (!stq.id || !stq.cfg) { res.writeHead(400); return res.end('{"streams":[]}'); }
+        var https2 = require('https');
+        var tpath = '/' + stq.cfg.replace(/^\/+|\/+$/g, '') + '/stream/series/' + encodeURIComponent(stq.id) + '.json';
+        var sreq = https2.get({ hostname: 'torrentio.strem.fun', path: tpath, headers: { 'Accept': 'application/json' } }, function (sr) {
+            var chunks = ''; sr.on('data', function (d) { chunks += d; });
+            sr.on('end', function () { res.writeHead(200); res.end(chunks || '{"streams":[]}'); });
+        });
+        sreq.on('error', function () { res.writeHead(200); res.end('{"streams":[]}'); });
+        sreq.setTimeout(12000, function () { sreq.destroy(); });
+        return;
+    }
+    // /next-episodes?id=<kitsu:44081:9>&n=3  -> the next N episode ids from series meta.
+    if (urlPath === '/next-episodes') {
+        var neq = require('url').parse(req.url, true).query || {};
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-cache');
+        var n = Math.max(1, Math.min(10, parseInt(neq.n, 10) || 3));
+        anilistAddon.fetchSeriesMeta((neq.id || '').replace(/:\d+$/, '')).then(function (meta) {
+            var vids = ((meta && meta.videos) || []).slice().filter(function (v) { return v && v.id; })
+                .sort(function (a, b) { return (a.season - b.season) || (a.episode - b.episode) || 0; });
+            var i = vids.findIndex(function (v) { return v.id === neq.id; });
+            var next = (i >= 0 ? vids.slice(i + 1, i + 1 + n) : []).map(function (v) { return v.id; });
+            res.writeHead(200); res.end(JSON.stringify({ next: next }));
+        }).catch(function () { res.writeHead(200); res.end('{"next":[]}'); });
         return;
     }
     if (urlPath === '/' || urlPath === '/index.html') {
