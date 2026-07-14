@@ -9,6 +9,7 @@ var Service = require('webos-service');
 var anilistAddon = require('./anilist-addon.js');
 var assExtract = require('./ass-extract.js');
 var assTee = require('./ass-tee.js');
+var srtAss = require('./srt-ass.js');
 
 var service = new Service('io.stremio.patched.server');
 var ready = false;
@@ -473,6 +474,38 @@ http.createServer(function(req, res) {
     }
     // /anime-streams?cfg=<torrentioConfig>&id=<kitsu:44081:10>  -> torrentio stream list
     //   (replicates what the core does; cfg carries the user's torbox token).
+    // /ext-sub?u=<encoded subtitle url>  -> fetch an EXTERNAL (addon) subtitle and
+    // return it as ASS so our JASSUB path can render it (the webOS player prints
+    // inline {\an8}-style tags literally). SRT (incl. SRT with {\an} tags) is
+    // converted; already-ASS passes through. Node fetch = no CORS, follows redirects.
+    if (urlPath === '/ext-sub') {
+        var esq = require('url').parse(req.url, true).query || {};
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.setHeader('Cache-Control', 'no-cache');
+        var esu = esq.u;
+        if (!esu || !/^https?:\/\//i.test(esu)) { res.writeHead(400); return res.end(''); }
+        var rx = parseInt(esq.rx, 10) || 0, ry = parseInt(esq.ry, 10) || 0;
+        var httpsM = require('https'), httpM = require('http');
+        var got = function (u, hops, cb) {
+            if (hops > 5) return cb(new Error('too many redirects'));
+            var mod = /^https:/i.test(u) ? httpsM : httpM;
+            var rq = mod.get(u, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*' } }, function (r) {
+                if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+                    r.resume(); var loc = require('url').resolve(u, r.headers.location); return got(loc, hops + 1, cb);
+                }
+                if (r.statusCode !== 200) { r.resume(); return cb(new Error('status ' + r.statusCode)); }
+                var buf = []; var n = 0;
+                r.on('data', function (d) { n += d.length; if (n > 8 * 1024 * 1024) { rq.destroy(new Error('too large')); return; } buf.push(d); });
+                r.on('end', function () { cb(null, Buffer.concat(buf).toString('utf8')); });
+            });
+            rq.on('error', cb); rq.setTimeout(15000, function () { rq.destroy(new Error('timeout')); });
+        };
+        got(esu, 0, function (err, txt) {
+            if (err || !txt) { res.writeHead(502); return res.end(''); }
+            var ass; try { ass = srtAss.srtToAss(txt, rx, ry); } catch (e) { ass = ''; }
+            res.writeHead(200); res.end(ass || '');
+        });
+        return;
+    }
     if (urlPath === '/anime-streams') {
         var stq = require('url').parse(req.url, true).query || {};
         res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-cache');

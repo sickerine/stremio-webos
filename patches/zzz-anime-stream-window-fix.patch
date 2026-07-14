@@ -1,0 +1,20 @@
+--- details.chunk.js
++++ details.chunk.js
+@@ -253,7 +253,7 @@
+                     try { return /kitsu(:|%3A)\d+/i.test(location.hash || "") } catch (e) { return !1 }
+                 }, __kSet = e => {
+                     window.__setAnimeStreamKind && window.__setAnimeStreamKind(e), __ks(e)
+-                }, w = () => (window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0(), __kv()) : __w0()), __w0 = () => {
++                }, w = () => ((window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0(), __kv()) : __w0())).slice(0, (x() || 0) + 5), __w0 = () => {
+                     var n;
+                     return e.addonsStreams.filter((({
+                         addon: e
+@@ -274,7 +274,7 @@
+                         externalUrl: e,
+                         tizenUrl: n,
+                         webosUrl: t
+-                    }) => !e || d.isWeb || d.isVidaa || d.isTitan || d.isNetTV || d.isTizen && n || d.isWebOS && t)).slice(0, (null !== (n = x()) && void 0 !== n ? n : 0) + 5)
++                    }) => !e || d.isWeb || d.isVidaa || d.isTitan || d.isNetTV || d.isTizen && n || d.isWebOS && t))
+                 }, k = e => {
+                     (0, i.vA)((() => {
+                         b(e), y(null), y(0)
