@@ -1,0 +1,20 @@
+--- details.chunk.js
++++ details.chunk.js
+@@ -152,7 +152,7 @@
+             I()(W.A, X);
+             const B = W.A && W.A.locals ? W.A.locals : void 0;
+             var G = (0, r.vs)("<div>"),
+-                H = (0, r.vs)("<div><div></div><div>");
++                H = (0, r.vs)("<div><div class=sbags></div><div></div><div>");
+             const V = e => {
+                 const n = (0, v.Vj)(),
+                     t = (0, s.W6)(),
+@@ -197,7 +197,7 @@
+                                 return B.icon
+                             },
+                             name: "play"
+-                        })), (0, i.gb)((() => (0, r.s7)(o, B["play-icon"]))), o), (n = H(), t = n.firstChild, a = t.nextSibling, (0, r.Yr)(t, (() => e.stream.name)), (0, r.Yr)(a, (() => e.stream.description)), (0, i.gb)((e => {
++                        })), (0, i.gb)((() => (0, r.s7)(o, B["play-icon"]))), o), (n = H(), t = n.firstChild.nextSibling, a = t.nextSibling, (0, i.gb)((() => { var _s = e.stream; _s && (_s.name || _s.description); window.__paintStreamBadges && window.__paintStreamBadges(n.firstChild, _s); })), (0, r.Yr)(t, (() => "")), (0, r.Yr)(a, (() => e.stream.description || e.stream.name || "")), (0, i.gb)((e => {
+                             var i = B.details,
+                                 o = B.name,
+                                 s = B.description;
