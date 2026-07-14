@@ -124,6 +124,26 @@
                 // core has pushed the change to the account before we re-pull.
                 try { setTimeout(function () { window.dispatchEvent(new Event('libchange')); }, 1500); } catch (e) {}
             };
+            // Finishing an episode is a PROGRESS update on a library item we already
+            // have — not an add/remove — so __libMark never fires and nothing above
+            // tells the "Next Up" row anything changed. Without this, the row only
+            // catches up on its blind 60s poll (and the service may still answer from
+            // a library pull up to 60s old, so it could lag ~2 min).
+            // So: watch for leaving the player and force a fresh pull. stremio-core
+            // pushes the watch progress to the ACCOUNT asynchronously, and our
+            // /library-next reads the account — so an immediate pull can legitimately
+            // still see the OLD episode. Retry across the window in which that sync
+            // lands. nuPull(ev) => truthy arg => ?fresh=1, bypassing both caches.
+            (function () {
+                function inPlayer() { return (location.hash || '').indexOf('#/player') === 0; }
+                var wasPlayer = inPlayer();
+                function bump() { try { window.dispatchEvent(new Event('libchange')); } catch (e) {} }
+                window.addEventListener('hashchange', function () {
+                    var now = inPlayer();
+                    if (wasPlayer && !now) { [300, 2500, 6000].forEach(function (d) { setTimeout(bump, d); }); }
+                    wasPlayer = now;
+                });
+            })();
             window.__sortAnimeStreams = function (streams, kindArg) {
                 try {
                     if (!streams || !streams.length) return streams;

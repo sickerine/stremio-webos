@@ -47,7 +47,7 @@
 +                            if (typeof window < "u") window.__nuCache = ms, window.__nuKey = key
 +                        }
 +                    })).catch((() => { Array.isArray(nuState()) || setNuState([]) }));
-+                    nuPull();
++                    nuPull(1);   // mount = fresh: we may have just come back from finishing an episode
 +                    const nuT = setInterval(nuPull, 6e4);
 +                    window.addEventListener("libchange", nuPull);
 +                    (0, r.Ki)((() => { clearInterval(aT1), clearInterval(aT2), clearInterval(nuT), window.removeEventListener("libchange", nuPull) }));
