@@ -36,7 +36,7 @@ build: service/server.js service/bin/ffmpeg service/bin/ffprobe
 	@rm -rf /tmp/stremio-vidaa-build
 	@for p in patches/*.patch; do \
 		echo "    Applying $$(basename $$p)..."; \
-		patch -p0 -d service/www < "$$p"; \
+		patch -p0 --no-backup-if-mismatch -d service/www < "$$p" || { echo "!! patch $$p FAILED — aborting build"; exit 1; }; \
 	done
 	@echo "==> Overlay: custom subtitle renderer (forked JASSUB + ass-controller)..."
 	@cp -R service/overlay/. service/www/
