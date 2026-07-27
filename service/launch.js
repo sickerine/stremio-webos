@@ -181,11 +181,34 @@ var FETCH_INTERCEPT = [
     "  if(!g.fetch||g.__kitsuEnrich)return; g.__kitsuEnrich=1;",
     "  var of=g.fetch.bind(g);",
     "  var mergedCache={};",
+    "  function hasStreams(r){",
+    "    if(!r||!r.ok)return Promise.resolve(false);",
+    "    return r.clone().json().then(function(d){return !!(d&&Array.isArray(d.streams)&&d.streams.length);});",
+    "  }",
+    "  function streamFallback(input,init,m){",
+    "    return of(input,init).then(function(direct){",
+    "      return hasStreams(direct).then(function(has){",
+    "        if(has)return direct;",
+    "        var sid;try{sid=decodeURIComponent(m[2]);}catch(e){return direct;}",
+    "        return of('http://127.0.0.1:8081/anime-map?id='+encodeURIComponent(sid))",
+    "          .then(function(r){return r.ok?r.json():null;})",
+    "          .then(function(mapped){",
+    "            if(!mapped||!/^tt\\d+:\\d+:\\d+$/.test(mapped.id||''))return direct;",
+    "            var mappedUrl=m[1]+encodeURIComponent(mapped.id)+m[3];",
+    "            return of(mappedUrl,init).then(function(retry){",
+    "              return hasStreams(retry).then(function(ok){return ok?retry:direct;});",
+    "            });",
+    "          }).catch(function(){return direct;});",
+    "      }).catch(function(){return direct;});",
+    "    });",
+    "  }",
     "  g.fetch=function(input,init){",
     "    var url=(typeof input==='string')?input:((input&&input.url)||'');",
     "    if(/aiometadatafortheweebs/.test(url)&&/\\/meta\\/(?:series|anime)\\/kitsu(?::|%3A)/i.test(url)){",
     "      return Promise.resolve(new Response('{\"meta\":null}',{status:404,headers:{'Content-Type':'application/json'}}));",
     "    }",
+    "    var sm=/^(https:\\/\\/torrentio\\.strem\\.fun\\/.+\\/stream\\/(?:series|anime)\\/)(kitsu(?::|%3A)\\d+(?::|%3A)\\d+)(\\.json(?:\\?.*)?)$/i.exec(url);",
+    "    if(sm&&!g.__streamMapOff)return streamFallback(input,init,sm);",
     "    var m=/anime-kitsu\\.strem\\.fun\\/meta\\/(?:series|anime)\\/(kitsu(?::|%3A)\\d+)\\.json/i.exec(url);",
     "    if(!m||g.__mergeOff)return of(input,init);",
     "    var kid;try{kid=decodeURIComponent(m[1]);}catch(e){kid=m[1];}",
@@ -335,6 +358,23 @@ http.createServer(function(req, res) {
             });
             res.end(JSON.stringify(r));
         }).catch(function () { res.writeHead(500); res.end('{"metas":[],"hasNext":false}'); });
+        return;
+    }
+    if (urlPath === '/anime-map') {
+        // Exact Kitsu episode -> canonical IMDb season/episode. The page fetch
+        // interceptor asks for this only when Torrentio's Kitsu route is empty.
+        var mq = require('url').parse(req.url, true).query || {};
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+        if (!/^kitsu:\d+:\d+$/.test(mq.id || '')) {
+            res.writeHead(400); return res.end('{"id":null}');
+        }
+        anilistAddon.subMap(mq.id).then(function (id) {
+            res.writeHead(200); res.end(JSON.stringify({ id: id || null }));
+        }).catch(function () {
+            res.writeHead(200); res.end('{"id":null}');
+        });
         return;
     }
     if (urlPath === '/v5-worker.js') {

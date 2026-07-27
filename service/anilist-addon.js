@@ -302,6 +302,88 @@ function fetchSeriesMeta(id) {
     }).catch(function () { return null; });
 }
 
+var cinemetaSearchCache = {};
+function searchCinemetaSeries(query) {
+    var key = String(query || '').trim().toLowerCase();
+    var c = cinemetaSearchCache[key];
+    if (c && (Date.now() - c.at) < 30 * 60 * 1000) return Promise.resolve(c.metas);
+    if (!key) return Promise.resolve([]);
+    return getJson({
+        hostname: 'v3-cinemeta.strem.io',
+        path: '/catalog/series/top/search=' + encodeURIComponent(query) + '.json',
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+    }).then(function (d) {
+        var metas = ((d || {}).metas || []).slice(0, 5);
+        cinemetaSearchCache[key] = { at: Date.now(), metas: metas };
+        return metas;
+    }).catch(function () { return []; });
+}
+
+function titleTokens(title) {
+    var stop = { a: 1, an: 1, and: 1, of: 1, the: 1, part: 1, season: 1, final: 1 };
+    return String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/)
+        .filter(function (x) { return x && !stop[x]; });
+}
+
+function relatedTitle(a, b) {
+    var aa = titleTokens(a), bb = titleTokens(b);
+    if (!aa.length || !bb.length) return false;
+    var seen = {}, common = 0;
+    aa.forEach(function (x) { seen[x] = 1; });
+    bb.forEach(function (x) { if (seen[x]) common++; });
+    return common / Math.min(aa.length, bb.length) >= 0.6;
+}
+
+// Resolve a season-local Kitsu episode to the standalone series identity used
+// by Cinemeta/Torrentio. This avoids franchise metadata flattening (for example,
+// Bleach TYBW Part 4 being folded into the original 2004 Bleach series).
+function standaloneMap(sid) {
+    var base = sid.replace(/:\d+$/, '');
+    return fetchSeriesMeta(base).then(function (kitsuMeta) {
+        if (!kitsuMeta) return null;
+        var selected = (kitsuMeta.videos || []).find(function (v) { return v.id === sid; });
+        var released = selected && String(selected.released || '').slice(0, 10);
+        if (!selected || !released) return null;
+
+        var queries = (kitsuMeta.aliases || []).concat([kitsuMeta.name]).filter(Boolean);
+        var unique = {};
+        queries = queries.filter(function (q) {
+            var key = String(q).toLowerCase();
+            if (unique[key]) return false;
+            unique[key] = 1;
+            return true;
+        });
+
+        function tryCandidates(query, candidates, index) {
+            if (index >= candidates.length) return Promise.resolve(null);
+            var candidate = candidates[index] || {};
+            if (!/^tt\d+$/.test(candidate.id || '') || !relatedTitle(query, candidate.name))
+                return tryCandidates(query, candidates, index + 1);
+            return fetchSeriesMeta(candidate.id).then(function (cinemetaMeta) {
+                var matches = ((cinemetaMeta && cinemetaMeta.videos) || []).filter(function (v) {
+                    return /^tt\d+:\d+:\d+$/.test(v.id || '') &&
+                        String(v.released || '').slice(0, 10) === released;
+                });
+                var exact = matches.find(function (v) { return v.episode === selected.episode; });
+                return (exact || matches[0] || {}).id || tryCandidates(query, candidates, index + 1);
+            });
+        }
+
+        function tryQueries(index) {
+            if (index >= queries.length) return Promise.resolve(null);
+            var query = queries[index];
+            return searchCinemetaSeries(query).then(function (candidates) {
+                return tryCandidates(query, candidates, 0);
+            }).then(function (id) {
+                return id || tryQueries(index + 1);
+            });
+        }
+
+        return tryQueries(0);
+    }).catch(function () { return null; });
+}
+
 function buildNextUp(libItems) {
     var cands = (libItems || []).filter(function (it) {
         return it && !it.removed && 'series' === it.type && it.state && it.state.lastWatched;
@@ -406,15 +488,12 @@ function buildNextUp(libItems) {
     });
 }
 
-// ---- Subtitle season/episode remap --------------------------------------
-// The anime-kitsu addon translates kitsu:ID:EP to IMDB naively by Kitsu's
-// season ordinal, which is wrong wherever Kitsu and IMDB split seasons
-// differently (kitsu:44081:9 -> tt9335498:3:9 = Swordsmith ep 9 instead of
-// Yuukaku ep 9 = S2E16). AIOMetadata's franchise meta carries the CORRECT
-// TVDB/IMDB (season, episode) per kitsu video id; map through it.
-function subMap(sid) {
+// ---- Stream season/episode remap ----------------------------------------
+// Prefer the standalone Cinemeta series identity because Torrentio indexes
+// anime releases against it. If no exact title+airdate match exists, use
+// AIOMetadata's franchise-wide TVDB/IMDb numbering.
+function franchiseMap(sid) {
     var m = /^kitsu:(\d+):(\d+)$/.exec(sid);
-    if (!m) return Promise.resolve(null);
     return fetchAIOMeta('kitsu:' + m[1]).then(function (meta) {
         if (!meta) return null;
         var vids = meta.videos || [];
@@ -429,6 +508,19 @@ function subMap(sid) {
         if (!tt) return null;
         return tt + ':' + v.season + ':' + v.episode;
     }).catch(function () { return null; });
+}
+
+var subMapCache = {};
+function subMap(sid) {
+    if (!/^kitsu:\d+:\d+$/.test(sid)) return Promise.resolve(null);
+    var c = subMapCache[sid];
+    if (c && (Date.now() - c.at) < 30 * 60 * 1000) return Promise.resolve(c.id);
+    return standaloneMap(sid).then(function (id) {
+        return id || franchiseMap(sid);
+    }).then(function (id) {
+        subMapCache[sid] = { at: Date.now(), id: id || null };
+        return id || null;
+    });
 }
 
 var MANIFEST = {
