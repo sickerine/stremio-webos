@@ -1,5 +1,5 @@
 DEVICE ?= tv
-APP_ID = io.strem.tv
+APP_ID = io.stremio.patched
 SERVER_VERSION = 4.20.17
 VIDAA_REF = 208d437e5138adff0865443a2a88c4fcee84ece6
 VIDAA_REPO = https://github.com/NoobyGains/stremio-vidaa-tv/archive/$(VIDAA_REF).tar.gz
