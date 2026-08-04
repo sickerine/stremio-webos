@@ -41,21 +41,28 @@ function convText(t) {
     return t.trim();
 }
 
+// Shared plain-text subtitle header. Embedded S_TEXT/UTF8 blocks already carry
+// timing in Matroska, so the streaming demuxer reuses this header + convText()
+// without round-tripping through a synthetic SRT document.
+function assHeader(resX, resY) {
+    var W = resX && isFinite(resX) ? Math.round(resX) : 1920;
+    var H = resY && isFinite(resY) ? Math.round(resY) : 1080;
+    var fs = Math.max(18, Math.round(60 * H / 1080));
+    var ol = Math.max(1, +(3 * H / 1080).toFixed(1));
+    var mv = Math.max(10, Math.round(40 * H / 1080));
+    return '[Script Info]\nScriptType: v4.00+\nPlayResX: ' + W + '\nPlayResY: ' + H + '\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n'
+        + '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
+        + 'Style: Default,Liberation Sans,' + fs + ',&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,' + ol + ',0,2,60,60,' + mv + ',1\n\n'
+        + '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n';
+}
+
 // resX/resY: script resolution (match the video; default 1920x1080). Style
 // scales with resY so it looks right at any resolution.
 function srtToAss(src, resX, resY) {
     if (!src) return '';
     src = src.replace(/^﻿/, '');                       // BOM
     if (/^\s*\[Script Info\]/.test(src) || /\n\s*Dialogue\s*:/.test(src)) return src;  // already ASS
-    var W = resX && isFinite(resX) ? Math.round(resX) : 1920;
-    var H = resY && isFinite(resY) ? Math.round(resY) : 1080;
-    var fs = Math.max(18, Math.round(60 * H / 1080));       // scale with res
-    var ol = Math.max(1, +(3 * H / 1080).toFixed(1));
-    var mv = Math.max(10, Math.round(40 * H / 1080));
-    var head = '[Script Info]\nScriptType: v4.00+\nPlayResX: ' + W + '\nPlayResY: ' + H + '\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n'
-        + '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
-        + 'Style: Default,Liberation Sans,' + fs + ',&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,' + ol + ',0,2,60,60,' + mv + ',1\n\n'
-        + '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n';
+    var head = assHeader(resX, resY);
     var out = [];
     var blocks = src.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split(/\n[ \t]*\n/);
     for (var i = 0; i < blocks.length; i++) {
@@ -78,4 +85,4 @@ function srtToAss(src, resX, resY) {
     return head + out.join('\n') + '\n';
 }
 
-module.exports = { srtToAss: srtToAss };
+module.exports = { srtToAss: srtToAss, assHeader: assHeader, textToAss: convText };
