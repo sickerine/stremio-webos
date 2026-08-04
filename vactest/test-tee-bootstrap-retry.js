@@ -33,7 +33,7 @@ function send(res, body, start) {
 
 var cdn = http.createServer(function (req, res) {
     var range = req.headers.range || '';
-    if (range === 'bytes=0-16777215') {
+    if (/^bytes=0-\d+$/.test(range)) {
         bootstrapHits++;
         return send(res, bootstrapHits <= 2 ? media.slice(0, info.headerLen) : media);
     }
