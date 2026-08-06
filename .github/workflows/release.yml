@@ -23,8 +23,8 @@ jobs:
       - name: Install ares-cli
         run: npm i -g @webosose/ares-cli
 
-      - name: Build
-        run: make build
+      - name: Test
+        run: make test
 
       - name: Package
         run: make package
