@@ -47,7 +47,8 @@ test('version releases get a chip and silently redirected cards get a subtle car
     const direct = { name: 'Nyaa\n1080p', description: '[Group] Show - 03v3 (1080p)' };
     const redirected = {
         name: 'Nyaa\n1080p',
-        description: '[Group] Show - 03 (1080p)\n👤 500 ⚙️ NyaaSi\n↗ Plays V2',
+        description: '[Group] Show - 03 (1080p)\n👤 500 ⚙️ NyaaSi',
+        __revisionRedirect: 'V2',
     };
 
     assert.deepEqual(Array.from(context.window.__streamBadges(direct)), ['1080p', 'V3']);
