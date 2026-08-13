@@ -53,6 +53,10 @@
             border-color: #ffb347; text-shadow: 0 1px 1px rgba(0,0,0,.35); }
         .sbag-bd { background: #0b6e6a; color: #e8fffc; border-color: #2dd4bf;
             box-shadow: 0 0 .45rem rgba(45, 212, 191, .25); }
+        .sbag-version { background: linear-gradient(135deg, #7254d8, #a855f7); color: #fff;
+            border-color: #c4a7ff; box-shadow: 0 0 .45rem rgba(168, 85, 247, .28); }
+        .stream-upgraded-card { background: linear-gradient(90deg, rgba(139, 92, 246, .13), transparent 58%);
+            box-shadow: inset .22rem 0 #a78bfa, inset 0 0 0 1px rgba(167, 139, 250, .14); }
         /* Hide Torrentio provider title; filename lives in description. */
         [class*="stream-"] [class*="name-"] { display: none !important; }
         [class*="stream-"] [class*="description-"] { color: hsla(0,0%,100%,.88) !important; font-weight: 600 !important;
@@ -174,6 +178,16 @@
                 ['480p', /(?:^|[^a-z0-9])480p(?:[^a-z0-9]|$)/i]
             ];
             var HDR_RE = /(?:^|[^a-z0-9])(?:hdr10\+?|hdr|dolby[ ._-]?vision)(?:[^a-z0-9]|$)/i;
+            var REDIRECT_RE = /↗\s*plays\s+(v\d+|repack\d*)/i;
+            function versionBadge(text) {
+                var redirect = REDIRECT_RE.exec(text);
+                if (redirect) return redirect[1].toUpperCase();
+                var numbered = /\b(?:s\d{1,2}e\d{1,4}|e\d{1,4}|\d{1,4})v(\d{1,2})\b/i.exec(text) ||
+                    /(?:^|[^a-z0-9])v(\d{1,2})(?:[^a-z0-9]|$)/i.exec(text);
+                if (numbered && +numbered[1] >= 2) return 'V' + +numbered[1];
+                var repack = /(?:^|[^a-z0-9])repack(\d*)(?:[^a-z0-9]|$)/i.exec(text);
+                return repack ? 'REPACK' + (repack[1] || '') : null;
+            }
             function qualityLine(name) {
                 var lines = String(name || '').split('\n'), out = [], i, ln;
                 for (i = 0; i < lines.length; i++) {
@@ -199,6 +213,8 @@
                     if (res) badges.push(res);
                     if (HDR_RE.test(q) || HDR_RE.test(blob)) badges.push('HDR');
                     if (isBD(blob)) badges.push('BD');
+                    var version = versionBadge(blob);
+                    if (version) badges.push(version);
                     return badges;
                 } catch (e) { return []; }
             };
@@ -218,12 +234,20 @@
                 try {
                     if (!el) return;
                     var badges = window.__streamBadges(stream);
+                    var blob = ((stream && stream.title) || '') + '\n' + ((stream && stream.description) || '') +
+                        '\n' + ((stream && stream.name) || '');
+                    var card = el.parentElement && el.parentElement.parentElement;
+                    if (card && card.classList) {
+                        if (REDIRECT_RE.test(blob)) card.classList.add('stream-upgraded-card');
+                        else card.classList.remove('stream-upgraded-card');
+                    }
                     el.textContent = '';
                     if (!badges.length) { el.classList.remove('has'); return; }
                     el.classList.add('has');
                     badges.forEach(function (b) {
                         var s = document.createElement('span');
-                        s.className = 'sbag sbag-' + String(b).toLowerCase();
+                        s.className = 'sbag sbag-' + String(b).toLowerCase() +
+                            (/^(?:v\d+|repack\d*)$/i.test(b) ? ' sbag-version' : '');
                         s.textContent = b;
                         el.appendChild(s);
                     });
