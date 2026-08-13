@@ -154,7 +154,8 @@
                     var id = entryId();
                     if (!id) return streams;
                     var kind = kindArg || window.__animeStreamKind();
-                    var list = streams;
+                    var list = window.__linkLatestStreamRevisions ?
+                        window.__linkLatestStreamRevisions(streams) : streams;
                     // core-transformed streams carry the torrent text in
                     // .description (title is often empty) — match on all of them.
                     var txt = function (s) { return ((s && (s.title || '')) + '\n' + (s && (s.description || '')) + '\n' + (s && (s.name || ''))); };
@@ -213,7 +214,7 @@
                     if (res) badges.push(res);
                     if (HDR_RE.test(q) || HDR_RE.test(blob)) badges.push('HDR');
                     if (isBD(blob)) badges.push('BD');
-                    var version = versionBadge(blob);
+                    var version = (stream && stream.__revisionRedirect) || versionBadge(blob);
                     if (version) badges.push(version);
                     return badges;
                 } catch (e) { return []; }
@@ -238,7 +239,7 @@
                         '\n' + ((stream && stream.name) || '');
                     var card = el.parentElement && el.parentElement.parentElement;
                     if (card && card.classList) {
-                        if (REDIRECT_RE.test(blob)) card.classList.add('stream-upgraded-card');
+                        if ((stream && stream.__revisionRedirect) || REDIRECT_RE.test(blob)) card.classList.add('stream-upgraded-card');
                         else card.classList.remove('stream-upgraded-card');
                     }
                     el.textContent = '';
@@ -263,6 +264,7 @@
         }
     </script>
     <script defer src="/stream-probe-session.js"></script>
+    <script defer src="/stream-revisions.js"></script>
     <script defer src="/subtitle-transition.js"></script>
     <script defer src="runtime.js"></script>
     <script defer src="main.js"></script>
