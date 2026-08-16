@@ -19,6 +19,8 @@
         var getMedia = dependencies.getMedia;
         var delay = dependencies.delay;
         var generation = 0;
+        var activeMediaKey = null;
+        var suppressedIntroEnd = null;
         var MAX_MEDIA_ATTEMPTS = 120;
 
         function unwrapMediaUrl(url) {
@@ -48,8 +50,25 @@
             }).catch(function () { return null; });
         }
 
+        function mediaKey(input) {
+            if (!input) return null;
+            return JSON.stringify([
+                input.id || null,
+                Number(input.durationMs) || null,
+                unwrapMediaUrl(input.expectedMediaUrl) || null,
+            ]);
+        }
+
+        function selectMedia(input) {
+            var nextKey = mediaKey(input);
+            if (nextKey === activeMediaKey) return;
+            activeMediaKey = nextKey;
+            suppressedIntroEnd = null;
+        }
+
         function load(input, apply) {
             var ticket = ++generation;
+            selectMedia(input);
             apply(null);
             if (!input || !/^kitsu:\d+:\d+$/.test(input.id || '') ||
                 !isFinite(Number(input.durationMs)) || Number(input.durationMs) <= 0)
@@ -64,10 +83,41 @@
 
         function clear(apply) {
             generation++;
+            activeMediaKey = null;
+            suppressedIntroEnd = null;
             if (typeof apply === 'function') apply(null);
         }
 
-        return { load: load, clear: clear };
+        function markIntroSkipped(end) {
+            end = Number(end);
+            suppressedIntroEnd = isFinite(end) ? end : null;
+        }
+
+        function shouldShowIntro(time, from, to) {
+            time = Number(time);
+            from = Number(from);
+            to = Number(to);
+            if (!isFinite(time) || !isFinite(from) || !isFinite(to)) return false;
+
+            if (suppressedIntroEnd !== null) {
+                if (time > suppressedIntroEnd) suppressedIntroEnd = null;
+                else if (to === suppressedIntroEnd) return false;
+            }
+
+            return time >= from && time <= to;
+        }
+
+        function shouldHandlePlayerOk(controlsVisible, menuVisible, nextVisible, skipVisible) {
+            return !controlsVisible && !menuVisible && !nextVisible && !skipVisible;
+        }
+
+        return {
+            load: load,
+            clear: clear,
+            markIntroSkipped: markIntroSkipped,
+            shouldShowIntro: shouldShowIntro,
+            shouldHandlePlayerOk: shouldHandlePlayerOk,
+        };
     }
 
     return { createController: createController };
