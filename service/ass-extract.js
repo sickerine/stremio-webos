@@ -19,6 +19,7 @@
 //   status(key)               -> {state, ass, bytes, fonts, coveredTo}
 //   track(key)                -> current accumulated ASS text (in-memory)
 //   fontPath(key, name)       -> path to a dumped font
+//   chapters(url)             -> named chapters from the exact selected media
 
 var fs = require('fs');
 var path = require('path');
@@ -144,4 +145,22 @@ function tick(key, t, seek) { var s = sessions[key]; if (s) s.tick(t, seek); ret
 function status(key) { var s = sessions[key]; if (!s) return { state: 'none', ass: false, fonts: [], key: key }; var st = s.status(); st.key = key; return st; }
 function track(key) { var s = sessions[key]; return s ? s.track() : ''; }
 
-module.exports = { prepare: prepare, tick: tick, status: status, track: track, fontPath: fontPath, keyFor: keyFor, PROXY_PORT: PROXY_PORT };
+function chapters(url) {
+    return new Promise(function (resolve) {
+        var key = keyFor(url);
+        MEDIA[key] = url;
+        cp.execFile(FFPROBE, ['-v', 'error', '-analyzeduration', '5M', '-probesize', '12M',
+            '-show_chapters', '-show_entries', 'chapter=start_time,end_time:chapter_tags=title',
+            '-of', 'json', '-i', srcFor(key)], { timeout: 12000, maxBuffer: 4 * 1024 * 1024 },
+        function (error, stdout) {
+            if (error && !stdout) return resolve([]);
+            try {
+                var parsed = JSON.parse(stdout);
+                resolve(Array.isArray(parsed.chapters) ? parsed.chapters : []);
+            } catch (parseError) { resolve([]); }
+        });
+    });
+}
+
+module.exports = { prepare: prepare, tick: tick, status: status, track: track, chapters: chapters,
+    fontPath: fontPath, keyFor: keyFor, PROXY_PORT: PROXY_PORT };

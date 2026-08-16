@@ -29,6 +29,27 @@ test('identity client returns every verified unique IMDb episode alias', async (
     });
 });
 
+test('identity client exposes provider IDs with the verified episode aliases', async () => {
+    const client = createIdentityClient(async () => ({
+        ids: { kitsu: 49444, myanimelist: 60636, imdb: 'tt0434665' },
+        titles: ['BLEACH: Thousand-Year Blood War Part 4'],
+        aliases: [
+            { id: 'tt14986406:4:4', confidence: 'verified' },
+            { id: 'tt0434665:17:44', confidence: 'verified' },
+            { id: 'tt0000000:1:1', confidence: 'provisional' },
+        ],
+    }));
+
+    assert.deepEqual(await client.resolveIdentity('kitsu:49444:4'), {
+        ids: { kitsu: 49444, myanimelist: 60636, imdb: 'tt0434665' },
+        titles: ['BLEACH: Thousand-Year Blood War Part 4'],
+        aliases: [
+            { id: 'tt14986406:4:4', confidence: 'verified' },
+            { id: 'tt0434665:17:44', confidence: 'verified' },
+        ],
+    });
+});
+
 test('identity client fails closed for malformed input and unavailable mapping data', async () => {
     let calls = 0;
     const client = createIdentityClient(async () => {

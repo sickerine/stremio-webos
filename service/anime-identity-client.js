@@ -11,8 +11,10 @@ function createIdentityClient(requestJson, options) {
     var now = options.now || Date.now;
     var cache = new Map();
 
-    function resolveEpisode(sid) {
-        if (!/^kitsu:\d+:\d+$/.test(sid || '')) return Promise.resolve([]);
+    function emptyIdentity() { return { ids: {}, titles: [], aliases: [] }; }
+
+    function resolveIdentity(sid) {
+        if (!/^kitsu:\d+:\d+$/.test(sid || '')) return Promise.resolve(emptyIdentity());
         var hit = cache.get(sid);
         if (hit && now() - hit.at < hit.ttl) return hit.value;
         var value = requestJson({
@@ -21,26 +23,41 @@ function createIdentityClient(requestJson, options) {
             method: 'GET',
             headers: { Accept: 'application/json' },
         }).then(function (payload) {
+            payload = payload || {};
             var seen = {};
-            var ids = ((payload || {}).aliases || []).filter(function (alias) {
+            var aliases = (payload.aliases || []).filter(function (alias) {
                 var id = alias && alias.id;
                 if (alias.confidence !== 'verified' || !/^tt\d+:\d+:\d+$/.test(id || '') || seen[id])
                     return false;
                 seen[id] = true;
                 return true;
-            }).map(function (alias) { return alias.id; });
-            cache.set(sid, { at: now(), ttl: ids.length ? POSITIVE_TTL : NEGATIVE_TTL,
-                value: Promise.resolve(ids) });
-            return ids;
+            });
+            var identity = {
+                ids: payload.ids && typeof payload.ids === 'object' ? payload.ids : {},
+                titles: Array.isArray(payload.titles) ? payload.titles.filter(function (title) {
+                    return typeof title === 'string' && title.trim();
+                }) : [],
+                aliases: aliases,
+            };
+            var hasData = aliases.length || Object.keys(identity.ids).length;
+            cache.set(sid, { at: now(), ttl: hasData ? POSITIVE_TTL : NEGATIVE_TTL,
+                value: Promise.resolve(identity) });
+            return identity;
         }).catch(function () {
             cache.delete(sid);
-            return [];
+            return emptyIdentity();
         });
         cache.set(sid, { at: now(), ttl: NEGATIVE_TTL, value: value });
         return value;
     }
 
-    return { resolveEpisode: resolveEpisode };
+    function resolveEpisode(sid) {
+        return resolveIdentity(sid).then(function (identity) {
+            return identity.aliases.map(function (alias) { return alias.id; });
+        });
+    }
+
+    return { resolveIdentity: resolveIdentity, resolveEpisode: resolveEpisode };
 }
 
 module.exports = { createIdentityClient: createIdentityClient };

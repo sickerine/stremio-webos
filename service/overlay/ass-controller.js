@@ -445,6 +445,7 @@
         } catch (e) {}
         return null;
     }
+    window.__stremioCurrentMedia = findMediaUrl;
     // Small transient status pill (e.g. "Extracting subtitles…") shown bottom-left
     // while the first, uncached extraction runs so the wait isn't a silent void.
     var _msgEl = null, _msgT = 0;

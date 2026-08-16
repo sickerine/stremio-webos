@@ -10,6 +10,10 @@ var anilistAddon = require('./anilist-addon.js');
 var assExtract = require('./ass-extract.js');
 var assTee = require('./ass-tee.js');
 var srtAss = require('./srt-ass.js');
+var skipResolver = require('./skip-timestamps.js').createResolver({
+    identity: { resolveIdentity: anilistAddon.episodeIdentity },
+    chapters: assExtract.chapters,
+});
 
 var service = new Service('io.stremio.patched.server');
 var ready = false;
@@ -377,6 +381,23 @@ http.createServer(function(req, res) {
             res.writeHead(200); res.end(JSON.stringify({ ids: ids || [] }));
         }).catch(function () {
             res.writeHead(200); res.end('{"ids":[]}');
+        });
+        return;
+    }
+    if (urlPath === '/skip-times') {
+        var skq = require('url').parse(req.url, true).query || {};
+        var durationMs = Number(skq.durationMs);
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+        if (!/^kitsu:\d+:\d+$/.test(skq.id || '') || !/^https?:\/\//.test(skq.u || '') ||
+            !isFinite(durationMs) || durationMs <= 0) {
+            res.writeHead(400); return res.end('{"intro":null,"outro":null}');
+        }
+        skipResolver.resolve({ id: skq.id, mediaUrl: skq.u, durationMs: durationMs }).then(function (result) {
+            res.writeHead(200); res.end(JSON.stringify(result));
+        }).catch(function () {
+            res.writeHead(200); res.end('{"intro":null,"outro":null}');
         });
         return;
     }
