@@ -40,9 +40,15 @@
 -                        if ("intro" === Ie()) st(r), we();
 +                        if ("intro" === Ie()) window.AnimeSkip.markIntroSkipped(r), st(r), we();
                          else st(null !== (n = Le()) && void 0 !== n ? n : 0)
-@@ -1223,7 +1225,7 @@
+@@ -1219,11 +1221,11 @@
+                 }, ft = () => {
+                     B(), Ee(!0)
+                 }, vt = () => {
+-                    Ce(!1), k((() => {
++                    window.AnimeSkip.shouldHandlePlayerActivity(tt(), j()) && (Ce(!1), k((() => {
                          Te(), Ce(!0)
-                     }))
+-                    }))
++                    })))
                  }, ht = () => {
 -                    !tt() && !nt() && !V() && at()
 +                    window.AnimeSkip.shouldHandlePlayerOk(tt(), nt(), V(), j()) && at()
