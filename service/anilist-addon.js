@@ -443,4 +443,5 @@ function handle(pathname) {
 
 module.exports = { handle: handle, MANIFEST: MANIFEST, _buildCatalog: buildCatalog, search: search,
     buildNextUp: buildNextUp, episodeAliases: identityClient.resolveEpisode,
+    episodeIdentity: identityClient.resolveIdentity,
     fetchSeriesMeta: fetchSeriesMeta };
