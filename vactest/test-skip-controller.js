@@ -87,3 +87,51 @@ test('matches a transcoded player URL to its original selected media', async () 
     }, () => {});
     assert.match(requested, /u=https%3A%2F%2Fcdn\.example%2Foriginal\.mkv/);
 });
+
+test('a successful intro skip stays dismissed when the media seek settles before the boundary', () => {
+    const controller = createController({
+        getMedia: () => null,
+        fetch: async () => response(null),
+        delay: async () => {},
+    });
+
+    assert.equal(controller.shouldShowIntro(83000, 62000, 152000), true);
+
+    controller.markIntroSkipped(152000);
+
+    assert.equal(controller.shouldShowIntro(152000, 62000, 152000), false);
+    assert.equal(controller.shouldShowIntro(148000, 62000, 152000), false);
+    assert.equal(controller.shouldShowIntro(152001, 62000, 152000), false);
+    assert.equal(controller.shouldShowIntro(83000, 62000, 152000), true);
+});
+
+test('the global player OK handler does not run while the skip action owns focus', () => {
+    const controller = createController({
+        getMedia: () => null,
+        fetch: async () => response(null),
+        delay: async () => {},
+    });
+
+    assert.equal(controller.shouldHandlePlayerOk(false, false, false, false), true);
+    assert.equal(controller.shouldHandlePlayerOk(false, false, false, true), false);
+    assert.equal(controller.shouldHandlePlayerOk(true, false, false, false), false);
+    assert.equal(controller.shouldHandlePlayerOk(false, true, false, false), false);
+    assert.equal(controller.shouldHandlePlayerOk(false, false, true, false), false);
+});
+
+test('intro suppression survives duplicate loads but resets for a different episode', async () => {
+    const controller = createController({
+        getMedia: () => ({ url: 'https://cdn.example/current.mkv' }),
+        fetch: async () => response({ intro: { from: 62000, to: 152000 }, outro: null }),
+        delay: async () => {},
+    });
+    const firstEpisode = { id: 'kitsu:1:1', durationMs: 1000000 };
+
+    await controller.load(firstEpisode, () => {});
+    controller.markIntroSkipped(152000);
+    await controller.load(firstEpisode, () => {});
+    assert.equal(controller.shouldShowIntro(83000, 62000, 152000), false);
+
+    await controller.load({ id: 'kitsu:1:2', durationMs: 1000000 }, () => {});
+    assert.equal(controller.shouldShowIntro(83000, 62000, 152000), true);
+});

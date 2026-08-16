@@ -11,6 +11,9 @@ test('the generated-player patch feeds the existing skip state and follows contr
     assert.match(patch, /get controlsVisible\(\)/);
     assert.match(patch, /autoFocus/);
     assert.match(patch, /with-controls/);
+    assert.match(patch, /markIntroSkipped/);
+    assert.match(patch, /shouldShowIntro/);
+    assert.match(patch, /shouldHandlePlayerOk\(tt\(\), nt\(\), V\(\), j\(\)\)/);
 });
 
 test('the browser controller is loaded before the player runtime', () => {
