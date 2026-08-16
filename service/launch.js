@@ -174,7 +174,9 @@ var SELF_DESTRUCT_SW = [
 // bare for airing shows. AIOMetadata has per-episode overviews/thumbnails/
 // titles and uses the SAME kitsu:<id>:<ep> video ids, so responses from the
 // Kitsu addon get episodes enriched in-flight, matched strictly by video id.
-var FETCH_INTERCEPT = [
+var FETCH_INTERCEPT = fs.readFileSync(
+    path.join(__dirname, 'overlay', 'anime-stream-aliases.js'), 'utf8'
+) + '\n' + [
     "(function(){",
     "  var AIO='https://aiometadatafortheweebs.midnightignite.me/stremio/e403afb8-02d5-416e-b520-6b9bb80e8e2f';",
     "  var g=(typeof self!=='undefined')?self:window;",
@@ -186,21 +188,21 @@ var FETCH_INTERCEPT = [
     "    return r.clone().json().then(function(d){return !!(d&&Array.isArray(d.streams)&&d.streams.length);});",
     "  }",
     "  function streamFallback(input,init,m){",
-    "    return of(input,init).then(function(direct){",
-    "      return hasStreams(direct).then(function(has){",
-    "        if(has)return direct;",
-    "        var sid;try{sid=decodeURIComponent(m[2]);}catch(e){return direct;}",
-    "        return of('http://127.0.0.1:8081/anime-map?id='+encodeURIComponent(sid))",
-    "          .then(function(r){return r.ok?r.json():null;})",
-    "          .then(function(mapped){",
-    "            if(!mapped||!/^tt\\d+:\\d+:\\d+$/.test(mapped.id||''))return direct;",
-    "            var mappedUrl=m[1]+encodeURIComponent(mapped.id)+m[3];",
-    "            return of(mappedUrl,init).then(function(retry){",
-    "              return hasStreams(retry).then(function(ok){return ok?retry:direct;});",
-    "            });",
-    "          }).catch(function(){return direct;});",
-    "      }).catch(function(){return direct;});",
-    "    });",
+    "    var sid;try{sid=decodeURIComponent(m[2]);}catch(e){return of(input,init);}",
+    "    var directP=of(input,init);",
+    "    var mappedP=of('http://127.0.0.1:8081/anime-map?id='+encodeURIComponent(sid))",
+    "      .then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});",
+    "    return Promise.all([directP,mappedP]).then(function(rs){",
+    "      var direct=rs[0],mapped=rs[1]||{},ids=Array.isArray(mapped.ids)?mapped.ids:[];",
+    "      return g.__sanitizeAnimeStreamResponse(direct,{sid:sid,ids:ids})",
+    "        .then(function(cleanDirect){return hasStreams(cleanDirect).then(function(has){",
+    "          if(has||!ids.length)return cleanDirect;",
+    "          return g.__retryAnimeStreamAliases({fetcher:of,init:init,direct:cleanDirect,sid:sid,",
+    "            prefix:m[1],suffix:m[3],ids:ids});",
+    "        });});",
+    "    }).catch(function(){return directP.then(function(direct){",
+    "      return g.__sanitizeAnimeStreamResponse(direct,{sid:sid,ids:[]});",
+    "    });});",
     "  }",
     "  g.fetch=function(input,init){",
     "    var url=(typeof input==='string')?input:((input&&input.url)||'');",
@@ -361,19 +363,20 @@ http.createServer(function(req, res) {
         return;
     }
     if (urlPath === '/anime-map') {
-        // Exact Kitsu episode -> canonical IMDb season/episode. The page fetch
-        // interceptor asks for this only when Torrentio's Kitsu route is empty.
+        // Exact Kitsu episode -> every verified IMDb season/episode alias. The
+        // page interceptor uses these to validate direct results, then retries
+        // the aliases only when no valid direct stream remains.
         var mq = require('url').parse(req.url, true).query || {};
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-cache');
         if (!/^kitsu:\d+:\d+$/.test(mq.id || '')) {
-            res.writeHead(400); return res.end('{"id":null}');
+            res.writeHead(400); return res.end('{"ids":[]}');
         }
-        anilistAddon.subMap(mq.id).then(function (id) {
-            res.writeHead(200); res.end(JSON.stringify({ id: id || null }));
+        anilistAddon.episodeAliases(mq.id).then(function (ids) {
+            res.writeHead(200); res.end(JSON.stringify({ ids: ids || [] }));
         }).catch(function () {
-            res.writeHead(200); res.end('{"id":null}');
+            res.writeHead(200); res.end('{"ids":[]}');
         });
         return;
     }
