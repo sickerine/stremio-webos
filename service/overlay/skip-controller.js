@@ -111,12 +111,17 @@
             return !controlsVisible && !menuVisible && !nextVisible && !skipVisible;
         }
 
+        function shouldHandlePlayerActivity(controlsVisible, skipVisible) {
+            return controlsVisible || !skipVisible;
+        }
+
         return {
             load: load,
             clear: clear,
             markIntroSkipped: markIntroSkipped,
             shouldShowIntro: shouldShowIntro,
             shouldHandlePlayerOk: shouldHandlePlayerOk,
+            shouldHandlePlayerActivity: shouldHandlePlayerActivity,
         };
     }
 

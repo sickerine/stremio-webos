@@ -119,6 +119,18 @@ test('the global player OK handler does not run while the skip action owns focus
     assert.equal(controller.shouldHandlePlayerOk(false, false, true, false), false);
 });
 
+test('remote activity cannot reveal controls before a focused skip action receives the press', () => {
+    const controller = createController({
+        getMedia: () => null,
+        fetch: async () => response(null),
+        delay: async () => {},
+    });
+
+    assert.equal(controller.shouldHandlePlayerActivity(false, true), false);
+    assert.equal(controller.shouldHandlePlayerActivity(false, false), true);
+    assert.equal(controller.shouldHandlePlayerActivity(true, true), true);
+});
+
 test('intro suppression survives duplicate loads but resets for a different episode', async () => {
     const controller = createController({
         getMedia: () => ({ url: 'https://cdn.example/current.mkv' }),
