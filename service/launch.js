@@ -179,6 +179,8 @@ var SELF_DESTRUCT_SW = [
 // titles and uses the SAME kitsu:<id>:<ep> video ids, so responses from the
 // Kitsu addon get episodes enriched in-flight, matched strictly by video id.
 var FETCH_INTERCEPT = fs.readFileSync(
+    path.join(__dirname, 'overlay', 'stream-refresh.js'), 'utf8'
+) + '\n' + fs.readFileSync(
     path.join(__dirname, 'overlay', 'anime-stream-aliases.js'), 'utf8'
 ) + '\n' + [
     "(function(){",

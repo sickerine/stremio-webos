@@ -1,0 +1,69 @@
+--- details.chunk.js
++++ details.chunk.js
+@@ -253,6 +253,9 @@
+                     try { return /kitsu(:|%3A)\d+/i.test(location.hash || "") } catch (e) { return !1 }
+                 }, __kSet = e => {
+                     window.__setAnimeStreamKind && window.__setAnimeStreamKind(e), __ks(e)
++                }, __refresh = () => {
++                    y(null), y(0);
++                    return e.onRefresh()
+                 }, w = () => ((window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0(), __kv()) : __w0())).slice(0, (x() || 0) + 5), __w0 = () => {
+                     var n;
+                     return e.addonsStreams.filter((({
+@@ -319,6 +322,18 @@
+                             }
+                         }), (0, i.a0)(i.wv, {
+                             get when() {
++                                return e.onRefresh
++                            },
++                            get children() {
++                                return (0, i.a0)(l.$n, {
++                                    label: "Refresh",
++                                    get onPress() {
++                                        return __refresh
++                                    }
++                                })
++                            }
++                        }), (0, i.a0)(i.wv, {
++                            get when() {
+                                 return g.supportsRating() && "movie" === e.type
+                             },
+                             get children() {
+@@ -741,6 +756,15 @@
+                     Y = () => {
+                         g.setRating("liked")
+                     },
++                    S = () => h({
++                        type: n(),
++                        metaId: t(),
++                        videoId: d(),
++                        guessStream: !0
++                    }),
++                    P = () => window.StreamRefresh
++                        ? window.StreamRefresh.reload(g.unload, S)
++                        : g.unload().then(S),
+                     I = () => {
+                         g.setRating("loved")
+                     };
+@@ -750,12 +774,7 @@
+                     }) => e === d()));
+                     e && x(e)
+                 })), (0, i.EH)((() => {
+-                    h({
+-                        type: n(),
+-                        metaId: t(),
+-                        videoId: d(),
+-                        guessStream: !0
+-                    })
++                    S()
+                 })), (0, i.a0)(l.YW, {
+                     get class() {
+                         return ce.details
+@@ -856,6 +875,7 @@
+                                             rating: p,
+                                             onLiked: Y,
+                                             onLoved: I,
++                                            onRefresh: P,
+                                             get type() {
+                                                 return n()
+                                             }
