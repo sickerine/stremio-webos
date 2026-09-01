@@ -11,8 +11,10 @@ test('the generated-player patch feeds the existing skip state and follows contr
     assert.match(patch, /get controlsVisible\(\)/);
     assert.match(patch, /autoFocus/);
     assert.match(patch, /with-controls/);
-    assert.match(patch, /markIntroSkipped/);
-    assert.match(patch, /shouldShowIntro/);
+    assert.match(patch, /markSkipped/);
+    assert.match(patch, /skipTarget/);
+    assert.match(patch, /visibleType/);
+    assert.doesNotMatch(patch, /else st\(Le\(\) \?\? 0\)/);
     assert.match(patch, /shouldHandlePlayerOk\(tt\(\), nt\(\), V\(\), j\(\)\)/);
     assert.match(patch, /shouldHandlePlayerActivity\(tt\(\), j\(\)\)/);
 });

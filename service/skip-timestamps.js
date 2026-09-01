@@ -40,9 +40,10 @@ function segment(type, from, to, source, episodeLength) {
 function fromChapters(chapters) {
     return (chapters || []).map(function (chapter) {
         var title = String(chapter && chapter.tags && chapter.tags.title || '').trim().toLowerCase();
-        var type = /^(?:op|opening)(?:\b|\s|[-_:])/i.test(title) || /opening (?:theme|credits|song)/i.test(title)
+        var type = /^(?:intro|ncop|op(?:ening)?)(?:\s*[-_:]?\s*\d+)?(?:\s+(?:theme|credits|song))?$/i.test(title)
             ? 'intro'
-            : (/^(?:ed|ending)(?:\b|\s|[-_:])/i.test(title) || /(?:ending|end) credits/i.test(title) ? 'outro' : null);
+            : (/^(?:outro|credits|nced|ed|ending)(?:\s*[-_:]?\s*\d+)?(?:\s+(?:theme|credits|song))?$/i.test(title) ||
+                /^end credits$/i.test(title) ? 'outro' : null);
         if (!type) return null;
         return segment(type, milliseconds(chapter.start_time), milliseconds(chapter.end_time), 'chapter');
     }).filter(Boolean);
@@ -83,7 +84,9 @@ function fromTheIntroDb(payload) {
 
 function fromAniSkip(payload) {
     return ((payload && payload.found && payload.results) || []).map(function (raw) {
-        var type = raw.skipType === 'op' ? 'intro' : (raw.skipType === 'ed' ? 'outro' : null);
+        var type = raw.skipType === 'op' || raw.skipType === 'mixed-op'
+            ? 'intro'
+            : (raw.skipType === 'ed' || raw.skipType === 'mixed-ed' ? 'outro' : null);
         if (!type || !raw.interval) return null;
         return segment(type, milliseconds(raw.interval.startTime), milliseconds(raw.interval.endTime),
             'aniskip', milliseconds(raw.episodeLength));
@@ -118,6 +121,14 @@ function strongestCluster(items, boundary) {
     return best.length >= 2 ? best : [];
 }
 
+function strongestOutroCluster(items) {
+    var cluster = strongestCluster(items, 'from');
+    if (cluster.length || items.length < 2) return cluster;
+    var sources = new Set(items.map(function (item) { return item.source; }));
+    if (sources.size !== 1) return [];
+    return [items.slice().sort(function (left, right) { return left.from - right.from; })[0]];
+}
+
 function reconcile(items, durationMs) {
     durationMs = Number(durationMs);
     if (!isFinite(durationMs) || durationMs <= 0) return { intro: null, outro: null };
@@ -125,15 +136,18 @@ function reconcile(items, durationMs) {
     var intros = valid.filter(function (item) { return item.type === 'intro'; });
     var outros = valid.filter(function (item) { return item.type === 'outro'; });
     var introCluster = strongestCluster(intros, 'to');
-    var outroCluster = strongestCluster(outros, 'from');
+    var outroCluster = strongestOutroCluster(outros);
     return {
         intro: introCluster.length ? {
             from: Math.min.apply(Math, introCluster.map(function (item) { return item.from; })),
             to: Math.max.apply(Math, introCluster.map(function (item) { return item.to; })),
         } : null,
-        outro: outroCluster.length
-            ? Math.min.apply(Math, outroCluster.map(function (item) { return item.from; }))
-            : null,
+        outro: outroCluster.length ? {
+            from: Math.min.apply(Math, outroCluster.map(function (item) { return item.from; })),
+            to: Math.min.apply(Math, outroCluster.map(function (item) {
+                return item.to == null ? durationMs : item.to;
+            })),
+        } : null,
     };
 }
 
@@ -173,7 +187,7 @@ function createResolver(options) {
         var path = '/v2/skip-times/' + mal + '/' + episode + '?' + encodeQuery({
             'types[]': 'op',
             episodeLength: Math.round(durationMs / 1000),
-        }) + '&types%5B%5D=ed';
+        }) + '&types%5B%5D=ed&types%5B%5D=mixed-op&types%5B%5D=mixed-ed';
         return safe(getJson({ hostname: 'api.aniskip.com', path: path, method: 'GET',
             headers: { Accept: 'application/json' } })).then(fromAniSkip);
     }
