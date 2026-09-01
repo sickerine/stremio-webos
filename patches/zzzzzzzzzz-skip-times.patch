@@ -28,19 +28,22 @@
                      stream: He,
                      videoParams: Ye,
                      paused: Ne,
-@@ -1209,8 +1211,8 @@
+@@ -1209,11 +1211,9 @@
                  }, mt = () => {
 -                    const e = T.state().introOutro;
 +                    const e = __skipData();
                      if (null !== e && null !== Le()) {
                          var t;
 -                        const r = null !== (t = null == e ? void 0 : e.intro.to) && void 0 !== t ? t : null;
-+                        const r = null !== (t = null == e || null == e.intro ? void 0 : e.intro.to) && void 0 !== t ? t : null;
-                         var n;
+-                        var n;
 -                        if ("intro" === Ie()) st(r), we();
-+                        if ("intro" === Ie()) window.AnimeSkip.markIntroSkipped(r), st(r), we();
-                         else st(null !== (n = Le()) && void 0 !== n ? n : 0)
-@@ -1219,11 +1221,11 @@
+-                        else st(null !== (n = Le()) && void 0 !== n ? n : 0)
++                        const r = window.AnimeSkip.skipTarget(Ie(), e);
++                        null !== r && (window.AnimeSkip.markSkipped(Ie(), r), st(r), we())
+                     }
+                     "outro" === Ie() && Ee(!0), B()
+                 }, ft = () => {
+@@ -1219,11 +1219,11 @@
                  }, ft = () => {
                      B(), Ee(!0)
                  }, vt = () => {
@@ -55,7 +58,7 @@
                  }, yt = () => {
                      !tt() && !nt() && !V() && we()
                  }, kt = () => {
-@@ -1267,6 +1269,18 @@
+@@ -1267,6 +1267,18 @@
                          })
                      }
                  })), (0, o.EH)((() => {
@@ -74,20 +77,23 @@
                      if (T.loaded() && C.ready() && null !== He()) {
                          const {
                              subtitles: e
-@@ -1308,10 +1322,10 @@
-                     var e, t, n, r, o;
+@@ -1308,10 +1320,9 @@
+-                    var e, t, n, r, o;
++                    var e;
                      const l = Re(),
                          a = Le(),
 -                        i = T.state().introOutro,
+-                        s = null !== (e = null == i || null === (t = i.intro) || void 0 === t ? void 0 : t.from) && void 0 !== e ? e : null,
+-                        u = null !== (n = null == i || null === (r = i.intro) || void 0 === r ? void 0 : r.to) && void 0 !== n ? n : null,
+-                        d = null !== (o = null == i ? void 0 : i.outro) && void 0 !== o ? o : null;
 +                        i = __skipData(),
-                         s = null !== (e = null == i || null === (t = i.intro) || void 0 === t ? void 0 : t.from) && void 0 !== e ? e : null,
-                         u = null !== (n = null == i || null === (r = i.intro) || void 0 === r ? void 0 : r.to) && void 0 !== n ? n : null,
-                         d = null !== (o = null == i ? void 0 : i.outro) && void 0 !== o ? o : null;
++                        d = null !== (e = null == i ? void 0 : i.outro) && void 0 !== e ? e : null,
++                        c = null !== l && null !== a ? window.AnimeSkip.visibleType(l, i, null === Be() && !Pe()) : null;
 -                    qe() && null !== Be() && !Pe() && null !== l && null !== a && (null !== d && l >= d || l < a && a - l <= We() ? $() : _()), null !== s && null !== u && null !== l && null !== a && (l >= s && l <= u ? (Oe("intro"), G()) : null !== d && l > s + 15e3 && l < d ? B() : null !== d && l >= d && null === Be() && !Pe() ? (Oe("outro"), G()) : B())
-+                    qe() && null !== Be() && !Pe() && null !== l && null !== a && (null !== d && l >= d || l < a && a - l <= We() ? $() : _()), null !== s && null !== u && null !== l && null !== a && (window.AnimeSkip.shouldShowIntro(l, s, u) ? (Oe("intro"), G()) : null !== d && l > s + 15e3 && l < d ? B() : null !== d && l >= d && null === Be() && !Pe() ? (Oe("outro"), G()) : B())
++                    qe() && null !== Be() && !Pe() && null !== l && null !== a && (null !== d && l >= d.from || l < a && a - l <= We() ? $() : _()), null !== c ? (Oe(c), G()) : B()
                  })), (0, o.EH)((() => {
                      const n = C.error();
-@@ -1542,5 +1556,8 @@
+@@ -1542,5 +1553,8 @@
                                      get skipIntroOutroType() {
                                          return Ie()
 +                                    },
@@ -96,7 +102,7 @@
                                      }
                                  })
                              }
-@@ -1775,6 +1792,7 @@
+@@ -1775,6 +1789,7 @@
                  l = n(3645),
                  a = n.n(l)()(o());
 -            a.push([e.id, ".intro-outro-popup-U6iEs {\n  position: absolute;\n  z-index: 3;\n  bottom: 8rem;\n  right: 0;\n  margin: 2rem;\n  display: flex;\n  flex-direction: row;\n}\n.intro-outro-popup-U6iEs > * {\n  margin: 0 1rem 0 1rem;\n}\n.intro-outro-popup-U6iEs > :first-child {\n  margin-left: 0;\n}\n.intro-outro-popup-U6iEs > :last-child {\n  margin-right: 0;\n}\n.intro-outro-popup-U6iEs .button-FRNRT {\n  background-color: #0c0c10;\n  border: 0.2rem solid transparent;\n}\n.intro-outro-popup-U6iEs .button-FRNRT[focused],\n.intro-outro-popup-U6iEs .button-FRNRT:hover {\n  border: 0.2rem solid rgba(255, 255, 255, 0.5);\n}\n.intro-outro-popup-U6iEs .button-FRNRT.confirm-laDC1[focused],\n.intro-outro-popup-U6iEs .button-FRNRT.confirm-laDC1:hover {\n  border: 0.2rem solid hsl(147.7, 68%, 51.7%);\n}\n", ""]), a.locals = {

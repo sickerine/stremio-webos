@@ -20,7 +20,7 @@
         var delay = dependencies.delay;
         var generation = 0;
         var activeMediaKey = null;
-        var suppressedIntroEnd = null;
+        var suppressedSkip = null;
         var MAX_MEDIA_ATTEMPTS = 120;
 
         function unwrapMediaUrl(url) {
@@ -63,7 +63,7 @@
             var nextKey = mediaKey(input);
             if (nextKey === activeMediaKey) return;
             activeMediaKey = nextKey;
-            suppressedIntroEnd = null;
+            suppressedSkip = null;
         }
 
         function load(input, apply) {
@@ -84,27 +84,43 @@
         function clear(apply) {
             generation++;
             activeMediaKey = null;
-            suppressedIntroEnd = null;
+            suppressedSkip = null;
             if (typeof apply === 'function') apply(null);
         }
 
-        function markIntroSkipped(end) {
+        function markSkipped(type, end) {
             end = Number(end);
-            suppressedIntroEnd = isFinite(end) ? end : null;
+            suppressedSkip = (type === 'intro' || type === 'outro') && isFinite(end)
+                ? { type: type, end: end }
+                : null;
         }
 
-        function shouldShowIntro(time, from, to) {
+        function shouldShow(type, time, value) {
+            if (!value || value.from == null || value.to == null) return false;
             time = Number(time);
-            from = Number(from);
-            to = Number(to);
+            var from = Number(value && value.from);
+            var to = Number(value && value.to);
             if (!isFinite(time) || !isFinite(from) || !isFinite(to)) return false;
 
-            if (suppressedIntroEnd !== null) {
-                if (time > suppressedIntroEnd) suppressedIntroEnd = null;
-                else if (to === suppressedIntroEnd) return false;
+            if (suppressedSkip !== null) {
+                if (time > suppressedSkip.end) suppressedSkip = null;
+                else if (type === suppressedSkip.type && to === suppressedSkip.end) return false;
             }
 
             return time >= from && time <= to;
+        }
+
+        function visibleType(time, data, allowOutro) {
+            if (data && shouldShow('intro', time, data.intro)) return 'intro';
+            if (allowOutro && data && shouldShow('outro', time, data.outro)) return 'outro';
+            return null;
+        }
+
+        function skipTarget(type, data) {
+            var value = data && data[type];
+            if (!value || value.to == null) return null;
+            var target = Number(value && value.to);
+            return isFinite(target) ? target : null;
         }
 
         function shouldHandlePlayerOk(controlsVisible, menuVisible, nextVisible, skipVisible) {
@@ -118,8 +134,9 @@
         return {
             load: load,
             clear: clear,
-            markIntroSkipped: markIntroSkipped,
-            shouldShowIntro: shouldShowIntro,
+            markSkipped: markSkipped,
+            visibleType: visibleType,
+            skipTarget: skipTarget,
             shouldHandlePlayerOk: shouldHandlePlayerOk,
             shouldHandlePlayerActivity: shouldHandlePlayerActivity,
         };
