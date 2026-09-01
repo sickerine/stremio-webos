@@ -319,8 +319,8 @@ http.createServer(function(req, res) {
         return;
     }
     if (urlPath === '/library-next') {
-        // "Next Up" home row: last-interacted library series with the episode
-        // to continue (progress) or watch next, sorted by newest aired episode.
+        // "Next Up" home row: small backlogs first, caught-up shows by their
+        // next release, then large backlogs and never-started library entries.
         var force = req.url.indexOf('fresh=1') >= 0;
         var freshP = (force || Date.now() - libraryPulledAt > 60000) ? pullLibrary() : Promise.resolve();
         freshP.then(function () {

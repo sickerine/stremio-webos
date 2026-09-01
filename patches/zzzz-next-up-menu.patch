@@ -1,0 +1,31 @@
+--- main.js
++++ main.js
+@@ -1951,9 +1951,9 @@
+                 } = u, v = () => e.item && "_id" in e.item ? e.item : null, p = () => e.item && !("_id" in e.item) ? e.item : null, m = () => {
+                     var e;
+                     return null === (e = h()) || void 0 === e ? void 0 : e.inLibrary
+                 }, g = () => {
+                     var e;
+-                    return null === (e = h()) || void 0 === e ? void 0 : e.watched
++                    return window.NextUpMenu ? window.NextUpMenu.watched(p(), h()) : null === (e = h()) || void 0 === e ? void 0 : e.watched
+                 }, y = () => {
+                     var e;
+                     return null === (e = h()) || void 0 === e || null === (e = e.trailerStreams) || void 0 === e || null === (e = e[0]) || void 0 === e || null === (e = e.deepLinks) || void 0 === e ? void 0 : e.player
+@@ -1975,7 +1975,7 @@
+                     const e = h();
+                     e && (m() ? c.removeFromLibrary(e) : c.addToLibrary(e))
+                 }, A = () => {
+-                    u.setWatched(!g())
++                    window.NextUpMenu ? window.NextUpMenu.toggle(p(), h(), u) : u.setWatched(!g())
+                 }, T = () => {
+                     const t = h();
+                     t && c.rewindLibraryItem(t), e.onClose()
+@@ -2046,7 +2046,7 @@
+                                                             onPress: k
+                                                         }), (0, o.a0)(o.wv, {
+                                                             get when() {
+-                                                                return w()
++                                                                return window.NextUpMenu ? window.NextUpMenu.hasDetails(p(), w()) : w()
+                                                             },
+                                                             get children() {
+                                                                 return (0, o.a0)(U, {

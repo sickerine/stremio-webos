@@ -1,6 +1,6 @@
 --- home.chunk.js	2026-07-11 00:29:14
 +++ home.chunk.js	2026-07-11 00:29:14
-@@ -56,6 +56,53 @@
+@@ -56,6 +56,52 @@
                      }, K = async () => {
                          localStorage.setItem("warningModalDismissed", "true"), G(!1)
                      };
@@ -27,9 +27,8 @@
 +                    ((typeof window < "u" && window.__animePreload) || fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json()))).then(aApply).catch((() => {}));
 +                    const aT1 = setInterval((() => { aMetas.length && (new Date).getDay() !== aToday && aBuild() }), 6e4),
 +                        aT2 = setInterval((() => { fetch("http://127.0.0.1:8081/anime-airing/schedule-week.json").then((e => e.json())).then(aApply).catch((() => {})) }), 18e5);
-+                    // "Next Up" row: last-interacted library shows with the episode
-+                    // to continue / watch next (built by the service from account
-+                    // library state), sorted by newest aired episode.
++                    // "Next Up" row: account library shows prioritized by usable
++                    // backlog size, then the closest upcoming episode.
 +                    // Stable-row design: ONE catalog object whose content starts as a
 +                    // request-state ({ready:null,error:null} -> native loading
 +                    // placeholders, fixed height), later becomes the items array.
@@ -41,7 +40,7 @@
 +                    let nuKey = (typeof window < "u" && window.__nuKey) || "";
 +                    const nuPull = (ev) => fetch("http://127.0.0.1:8081/library-next" + (ev ? "?fresh=1" : "")).then((e => e.json())).then((e => {
 +                        const ms = e && e.metas || [];
-+                        const key = JSON.stringify(ms.map((m => [m.id, m.poster, m.nextUp && m.nextUp.label, m.nextUp && m.nextUp.progress, m.airingAt])));
++                        const key = JSON.stringify(ms.map((m => [m.id, m.poster, m.nextUp && m.nextUp.label, m.nextUp && m.nextUp.progress, m.nextUp && m.nextUp.videoId, m.airingAt])));
 +                        if (key !== nuKey || !Array.isArray(nuState())) {
 +                            nuKey = key, setNuState(ms);
 +                            if (typeof window < "u") window.__nuCache = ms, window.__nuKey = key
@@ -54,7 +53,7 @@
                      return (0, r.EH)((() => {
                          const e = b() - (N() ? 1 : 0);
                          h((() => v.loadCatalogs(e)))
-@@ -101,7 +148,7 @@
+@@ -101,7 +147,7 @@
                                  get children() {
                                      return (0, r.a0)(r.jK, {
                                          get each() {
@@ -63,7 +62,7 @@
                                          },
                                          children: (e, t) => (0, r.a0)(s.WC, {
                                              get catalog() {
-@@ -114,7 +161,9 @@
+@@ -114,7 +160,9 @@
                                              get autoFocus() {
                                                  return b() === t
                                              },
