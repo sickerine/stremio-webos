@@ -12,6 +12,7 @@
 // Served by launch.js at /anime-airing/... on the app's own :8081 server.
 
 var https = require('https');
+var nextUp = require('./next-up.js');
 
 // Route artwork through the local downscaling proxy (see launch.js /img):
 // full-size Kitsu/TVDB art is what lags the TV's decoder/compositor.
@@ -272,9 +273,6 @@ function search(query, page) {
 }
 
 // ---- "Next Up" builder for the Home library row -----------------------------
-// Takes full library items (with watch state) and computes, per show: the
-// episode to surface (in-progress with %, or the next unwatched one), plus a
-// sort key = the newest aired episode date ("last episode added").
 var AIO_HOST = 'aiometadatafortheweebs.midnightignite.me';
 var AIO_PATH = '/stremio/e403afb8-02d5-416e-b520-6b9bb80e8e2f';
 var aioCache = {};
@@ -304,64 +302,48 @@ function fetchSeriesMeta(id) {
     }).catch(function () { return null; });
 }
 
+function mapLimit(items, limit, worker) {
+    return new Promise(function (resolve) {
+        var results = new Array(items.length), next = 0, active = 0;
+        function pump() {
+            if (next >= items.length && active === 0) return resolve(results);
+            while (active < limit && next < items.length) {
+                (function (index) {
+                    next++; active++;
+                    Promise.resolve(worker(items[index])).then(function (result) {
+                        results[index] = result;
+                    }, function () {
+                        results[index] = null;
+                    }).then(function () {
+                        active--; pump();
+                    });
+                })(next);
+            }
+        }
+        pump();
+    });
+}
+
 function buildNextUp(libItems) {
     var cands = (libItems || []).filter(function (it) {
-        return it && !it.removed && 'series' === it.type && it.state && it.state.lastWatched;
-    }).sort(function (a, b) {
-        return new Date(b.state.lastWatched) - new Date(a.state.lastWatched);
-    }).slice(0, 20);
-    return Promise.all(cands.map(function (it) {
+        return it && !it.removed && 'series' === it.type && it.state;
+    });
+    return mapLimit(cands, 6, function (it) {
         var isKitsu = /^kitsu:/.test(it._id);
         var schedP = isKitsu ? airingScheduleForKitsu(it._id.split(':')[1]) : Promise.resolve({});
         return Promise.all([fetchSeriesMeta(it._id), schedP]).then(function (r) {
             var meta = r[0], sched = r[1] || {};
             if (!meta || !(meta.videos || []).length) return null;
-            var vids = meta.videos.filter(function (v) {
-                return v && v.id && (void 0 === v.season || v.season > 0); // skip specials
-            });
-            vids.sort(function (a, b) {
-                var ae = a.episode || parseInt(String(a.id).split(':').pop(), 10) || 0;
-                var be = b.episode || parseInt(String(b.id).split(':').pop(), 10) || 0;
-                return (a.season || 0) - (b.season || 0) || ae - be;
-            });
-            // Kitsu premiere-stamps every episode of airing shows with one date;
-            // prefer the AniList schedule for real airdates in that case.
-            var uniq = {};
-            vids.forEach(function (v) { if (v.released) uniq[v.released] = 1; });
-            var stamped = isKitsu && vids.length > 1 && Object.keys(uniq).length <= 1;
-            function relOf(v) {
-                if (isKitsu) {
-                    var ep = parseInt(String(v.id).split(':').pop(), 10);
-                    if (sched[ep]) return sched[ep];
-                    if (stamped) return null;
-                }
-                return v.released || null;
-            }
-            var nowIso = new Date().toISOString();
-            var released = vids.filter(function (v) { var r = relOf(v); return r && r <= nowIso; });
-            if (!released.length) released = vids; // no usable dates -> assume aired
-            var st = it.state, idx = -1;
-            if (st.video_id) for (var i = 0; i < released.length; i++)
-                if (released[i].id === st.video_id) { idx = i; break; }
-            var frac = st.duration > 0 ? st.timeOffset / st.duration : 0;
-            var target, prog = 0;
-            if (idx < 0) {
-                // video_id can point at a not-yet-aired episode (the core
-                // advances past the last finished one) -> caught up, show the
-                // countdown; only genuinely-unwatched shows start at EP 1.
-                var pointsAhead = st.video_id && vids.some(function (v) { return v.id === st.video_id; });
-                target = pointsAhead ? null : released[0];
-            }
-            else if (frac >= 0.95) target = released[idx + 1] || null;
-            else { target = released[idx]; prog = frac > 0.02 ? frac : 0; }
-            var latest = '';
-            released.forEach(function (v) { var r = relOf(v) || v.released || ''; if (r > latest) latest = r; });
-            // Caught up -> surface the next unaired episode instead.
-            var un = null;
-            if (!target) for (var j = 0; j < vids.length; j++) {
-                var rr = relOf(vids[j]); if (rr && rr > nowIso) { un = { v: vids[j], r: rr }; break; }
-            }
-            var shown = target || (un && un.v) || null;
+            return nextUp.plan(it, meta, sched, new Date());
+        });
+    }).then(function (plans) {
+        return nextUp.rank(plans, 15);
+    }).then(function (plans) {
+        return Promise.all(plans.map(function (entry) {
+            var it = entry.item, meta = entry.meta;
+            var isKitsu = /^kitsu:/.test(it._id);
+            var target = entry.target, un = entry.upcoming;
+            var shown = target || un || null;
             var showName = meta.name || it.name;
             var out = {
                 id: it._id,
@@ -373,9 +355,7 @@ function buildNextUp(libItems) {
                 background: meta.background || undefined,
                 description: meta.description || undefined,
                 __ours: true,
-                __latest: latest,
-                deepLinks: { metaDetailsVideos: '#/detail/series/' + encodeURIComponent(it._id) +
-                    (target ? '/' + encodeURIComponent(target.id) : '') }
+                deepLinks: nextUp.deepLinks(it._id, target)
             };
             var thumbP = Promise.resolve(shown && shown.thumbnail);
             if (isKitsu && shown && !shown.thumbnail)
@@ -391,20 +371,19 @@ function buildNextUp(libItems) {
                     return (!isKitsu && null != v.season) ? ('S' + v.season + 'E' + ep) : ('EP ' + ep);
                 }
                 if (target) {
-                    out.nextUp = { show: showName, label: (prog ? '' : 'NEXT · ') + epLabelOf(target), progress: Math.round(100 * prog) };
+                    out.nextUp = {
+                        show: showName,
+                        label: (entry.progress ? '' : 'NEXT · ') + epLabelOf(target),
+                        progress: Math.round(100 * entry.progress),
+                        videoId: target.id
+                    };
                 } else if (un) {
-                    out.nextUp = { show: showName, label: epLabelOf(un.v), progress: 0 };
-                    out.airingAt = Math.floor(new Date(un.r).getTime() / 1000); // client appends live countdown
-                } else {
-                    out.nextUp = { show: showName, label: 'UP TO DATE', progress: 0 };
+                    out.nextUp = { show: showName, label: epLabelOf(un), progress: 0 };
+                    out.airingAt = Math.floor(new Date(entry.nextRelease).getTime() / 1000);
                 }
                 return out;
             });
-        });
-    })).then(function (list) {
-        return list.filter(Boolean).sort(function (a, b) {
-            return String(b.__latest || '').localeCompare(String(a.__latest || ''));
-        }).slice(0, 15).map(function (x) { delete x.__latest; return x; });
+        }));
     });
 }
 
