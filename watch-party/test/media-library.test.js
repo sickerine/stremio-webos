@@ -9,7 +9,7 @@ import { createMediaLibrary } from "../src/media-library.js";
 const temporaryDirectories = [];
 afterEach(async () => Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))));
 
-test("media library atomically publishes one current strm and waits for Jellyfin indexing", async () => {
+test("media library atomically publishes a strm without deleting an active queued stream", async () => {
   const mediaRoot = await mkdtemp(path.join(tmpdir(), "watch-party-library-"));
   temporaryDirectories.push(mediaRoot);
   await writeFile(path.join(mediaRoot, "obsolete.strm"), "https://old.example/video.mkv\n");
@@ -28,5 +28,5 @@ test("media library atomically publishes one current strm and waits for Jellyfin
 
   assert.equal(item.Id, "indexed-item");
   assert.equal(await readFile(indexedPath, "utf8"), "https://torbox.example/real.mkv\n");
-  assert.deepEqual(await readdir(mediaRoot), [path.basename(indexedPath)]);
+  assert.deepEqual((await readdir(mediaRoot)).sort(), [path.basename(indexedPath), "obsolete.strm"].sort());
 });
