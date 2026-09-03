@@ -1,0 +1,168 @@
+const CLIENT_NAME = "Stremio TV Bridge";
+const CLIENT_VERSION = "1.0.0";
+
+function authorizationHeader(deviceId, token = "") {
+  const fields = [
+    `Client="${CLIENT_NAME}"`,
+    'Device="LG webOS TV"',
+    `DeviceId="${deviceId}"`,
+    `Version="${CLIENT_VERSION}"`,
+  ];
+  if (token) fields.push(`Token="${token}"`);
+  return `MediaBrowser ${fields.join(", ")}`;
+}
+
+export function createJellyfinClient(options = {}) {
+  const baseUrl = (options.baseUrl || process.env.JELLYFIN_URL || "http://jellyfin:8096").replace(/\/$/, "");
+  const username = options.username || process.env.JELLYFIN_USERNAME || "watchparty";
+  const password = options.password || process.env.JELLYFIN_PASSWORD || "watchparty";
+  const libraryName = options.libraryName || process.env.JELLYFIN_LIBRARY_NAME || "Watch Party";
+  const deviceId = options.deviceId || process.env.JELLYFIN_DEVICE_ID || "stremio-tv-bridge";
+  const fetchImplementation = options.fetchImplementation || fetch;
+  let accessToken = "";
+  let user = null;
+
+  async function request(pathname, requestOptions = {}) {
+    const headers = new Headers(requestOptions.headers);
+    headers.set("accept", "application/json");
+    headers.set("authorization", authorizationHeader(deviceId, accessToken));
+    if (requestOptions.body !== undefined) headers.set("content-type", "application/json");
+    if (accessToken) headers.set("x-emby-token", accessToken);
+    const response = await fetchImplementation(`${baseUrl}${pathname}`, { ...requestOptions, headers });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Jellyfin ${requestOptions.method || "GET"} ${pathname} failed (${response.status}): ${detail}`);
+    }
+    if (response.status === 204 || response.headers.get("content-length") === "0") return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  async function waitUntilReady() {
+    let lastError;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try { return await request("/System/Info/Public"); }
+      catch (error) {
+        lastError = error;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    throw lastError;
+  }
+
+  async function completeStartupWizard() {
+    await request("/Startup/User");
+    await request("/Startup/Configuration", {
+      method: "POST",
+      body: JSON.stringify({ UICulture: "en-US", MetadataCountryCode: "US", PreferredMetadataLanguage: "en" }),
+    });
+    await request("/Startup/User", {
+      method: "POST",
+      body: JSON.stringify({ Name: username, Password: password }),
+    });
+    await request("/Startup/RemoteAccess", {
+      method: "POST",
+      body: JSON.stringify({ EnableRemoteAccess: true, EnableAutomaticPortMapping: false }),
+    });
+    await request("/Startup/Complete", { method: "POST" });
+  }
+
+  async function authenticate() {
+    const result = await request("/Users/AuthenticateByName", {
+      method: "POST",
+      body: JSON.stringify({ Username: username, Pw: password }),
+    });
+    accessToken = result.AccessToken;
+    user = result.User;
+  }
+
+  async function configureUser() {
+    const configuration = {
+      ...user.Configuration,
+      SubtitleLanguagePreference: "eng",
+      SubtitleMode: "Always",
+      RememberSubtitleSelections: true,
+    };
+    await request(`/Users/Configuration?userId=${encodeURIComponent(user.Id)}`, {
+      method: "POST",
+      body: JSON.stringify(configuration),
+    });
+  }
+
+  async function ensureLibrary() {
+    const libraries = await request("/Library/VirtualFolders");
+    if (libraries.some(library => library.Name === libraryName)) return;
+    const query = new URLSearchParams({ name: libraryName, collectionType: "movies", paths: "/media", refreshLibrary: "true" });
+    await request(`/Library/VirtualFolders?${query}`, {
+      method: "POST",
+      body: JSON.stringify({
+        LibraryOptions: {
+          EnableRealtimeMonitor: true,
+          EnableInternetProviders: false,
+          EnableChapterImageExtraction: false,
+          ExtractChapterImagesDuringLibraryScan: false,
+          MediaPathInfos: [{ Path: "/media" }],
+        },
+      }),
+    });
+  }
+
+  async function initialize() {
+    const info = await waitUntilReady();
+    if (!info.StartupWizardCompleted) await completeStartupWizard();
+    await authenticate();
+    await configureUser();
+    await ensureLibrary();
+  }
+
+  async function refreshLibrary() { await request("/Library/Refresh", { method: "POST" }); }
+
+  async function findItemByPath(itemPath) {
+    const query = new URLSearchParams({ Recursive: "true", Fields: "Path", Limit: "100" });
+    const result = await request(`/Items?${query}`);
+    return result.Items.find(item => item.Path === itemPath) || null;
+  }
+
+  async function ensureGroup(groupName) {
+    const groups = await request("/SyncPlay/List");
+    const existing = groups.find(group => group.GroupName === groupName);
+    if (existing) {
+      await request("/SyncPlay/Join", { method: "POST", body: JSON.stringify({ GroupId: existing.GroupId }) });
+    } else {
+      await request("/SyncPlay/New", { method: "POST", body: JSON.stringify({ GroupName: groupName }) });
+    }
+    await request("/SyncPlay/SetIgnoreWait", { method: "POST", body: JSON.stringify({ IgnoreWait: true }) });
+  }
+
+  async function setQueue(itemId, positionSeconds) {
+    await request("/SyncPlay/SetNewQueue", {
+      method: "POST",
+      body: JSON.stringify({
+        PlayingQueue: [itemId],
+        PlayingItemPosition: 0,
+        StartPositionTicks: Math.round(positionSeconds * 10_000_000),
+      }),
+    });
+  }
+
+  async function pause() { await request("/SyncPlay/Pause", { method: "POST" }); }
+  async function unpause() { await request("/SyncPlay/Unpause", { method: "POST" }); }
+  async function seek(positionSeconds) {
+    await request("/SyncPlay/Seek", {
+      method: "POST",
+      body: JSON.stringify({ PositionTicks: Math.round(positionSeconds * 10_000_000) }),
+    });
+  }
+
+  return {
+    initialize,
+    refreshLibrary,
+    findItemByPath,
+    ensureGroup,
+    setQueue,
+    pause,
+    unpause,
+    seek,
+    status() { return { authenticated: Boolean(accessToken), userId: user?.Id || null }; },
+  };
+}

@@ -42,7 +42,7 @@ const video = new FakeVideo();
 const storage = {
     watchPartyEnabled: '1',
     watchPartyRoom: 'living-room',
-    watchPartyUrl: 'ws://192.168.1.47:3210/ws'
+    watchPartyUrl: 'ws://192.168.1.47:3211/ws'
 };
 const intervals = [];
 const sandbox = {
@@ -72,7 +72,7 @@ vm.runInNewContext(source, sandbox);
 
 assert.strictEqual(FakeWebSocket.instances.length, 1, 'bridge connects once');
 const socket = FakeWebSocket.instances[0];
-assert.strictEqual(socket.url, 'ws://192.168.1.47:3210/ws?room=living-room&role=tv');
+assert.strictEqual(socket.url, 'ws://192.168.1.47:3211/ws?room=living-room&role=tv');
 socket.open();
 
 assert.strictEqual(socket.sent.length, 1, 'opening the socket publishes current state');
@@ -88,5 +88,9 @@ video.emit('pause');
 assert.strictEqual(socket.sent.length, 2, 'player events publish immediately');
 assert.strictEqual(socket.sent[1].state.paused, true);
 assert.ok(socket.sent[1].state.sequence > first.state.sequence);
+
+video.emit('waiting');
+video.emit('stalled');
+assert.strictEqual(socket.sent.length, 2, 'buffering noise never generates sync commands');
 
 console.log('watch-party controller tests passed');
