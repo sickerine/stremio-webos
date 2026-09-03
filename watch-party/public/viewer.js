@@ -243,6 +243,9 @@ export function createPassiveViewer(options = {}) {
         style.textContent = PASSIVE_PLAYER_STYLE;
         frameDocument.head?.appendChild(style);
       }
+      frameDocument.addEventListener?.("click", event => {
+        if (event.target?.tagName === "VIDEO") event.stopImmediatePropagation?.();
+      }, true);
     }
     protectVideo(video);
   }
