@@ -42,10 +42,13 @@ export function createPassiveViewer(options = {}) {
   const player = document.getElementById("player");
   const statusTitle = document.getElementById("status-title");
   const statusBody = document.getElementById("status-body");
+  const soundPrompt = document.getElementById("sound-prompt");
   let frame = null;
   let frameMonitor = null;
   let activeSessionId = null;
   let bootingSessionId = null;
+  let tvPaused = true;
+  let autoplayAttempt = null;
   let generation = 0;
   let socket = null;
   let reconnectTimer = null;
@@ -64,6 +67,8 @@ export function createPassiveViewer(options = {}) {
     frameMonitor = null;
     if (frame) frame.src = "about:blank";
     frame = null;
+    autoplayAttempt = null;
+    soundPrompt.hidden = true;
     player.replaceChildren();
     player.hidden = true;
   }
@@ -99,6 +104,37 @@ export function createPassiveViewer(options = {}) {
     }));
   }
 
+  function currentVideo() {
+    try { return frame?.contentWindow?.document?.querySelector("video") || null; }
+    catch (error) { return null; }
+  }
+
+  function enableSound() {
+    const video = currentVideo();
+    if (!video || !video.muted) return;
+    video.muted = false;
+    soundPrompt.hidden = true;
+    if (!tvPaused) {
+      Promise.resolve().then(() => video.play()).catch(() => {
+        video.muted = true;
+        soundPrompt.hidden = false;
+      });
+    }
+  }
+
+  function ensurePlaying(video) {
+    if (tvPaused || !video.paused || autoplayAttempt) return;
+    autoplayAttempt = Promise.resolve()
+      .then(() => video.play())
+      .catch(() => {
+        video.muted = true;
+        soundPrompt.hidden = false;
+        return video.play();
+      })
+      .catch(() => {})
+      .finally(() => { autoplayAttempt = null; });
+  }
+
   function hardenPlayer(frameDocument) {
     if (!frameDocument || frameDocument.getElementById?.("passive-viewer-restrictions")) return;
     const style = frameDocument.createElement?.("style");
@@ -108,11 +144,13 @@ export function createPassiveViewer(options = {}) {
       frameDocument.head?.appendChild(style);
     }
     frameDocument.addEventListener?.("keydown", event => {
+      enableSound();
       if ([" ", "k", "j", "l", "arrowleft", "arrowright", "pagedown", "pageup"].includes(event.key.toLowerCase())) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
     }, true);
+    frameDocument.addEventListener?.("pointerdown", enableSound, true);
   }
 
   function watchFrame(nextFrame) {
@@ -127,6 +165,7 @@ export function createPassiveViewer(options = {}) {
           setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
           return;
         }
+        ensurePlaying(video);
         waiting.hidden = true;
         player.hidden = false;
       } catch (error) {
@@ -170,6 +209,7 @@ export function createPassiveViewer(options = {}) {
   function handleViewerState(message) {
     if (message?.type !== "viewer-state") return;
     if (message.mode === "playing" && message.sessionId) {
+      tvPaused = Boolean(message.paused);
       showPlaying(message);
       return;
     }
@@ -194,6 +234,11 @@ export function createPassiveViewer(options = {}) {
       try { socket.close(); } catch (error) {}
     });
   }
+
+
+  soundPrompt.addEventListener("click", enableSound);
+  document.addEventListener?.("pointerdown", enableSound, true);
+  document.addEventListener?.("keydown", enableSound, true);
 
   showWaiting();
   connect();

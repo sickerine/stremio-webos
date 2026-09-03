@@ -80,7 +80,7 @@ test("a viewer waits, follows the active TV session, and returns to waiting on T
     },
   }));
   assert.deepEqual(await playing, {
-    type: "viewer-state", mode: "playing", sessionId: "episode-1", title: "Episode 1",
+    type: "viewer-state", mode: "playing", sessionId: "episode-1", title: "Episode 1", paused: false,
   });
 
   const waiting = nextMessage(viewer, "viewer-state");
@@ -201,7 +201,7 @@ test("a late idle event from the previous episode cannot close the current one",
   await idleAck;
   const status = await fetch(`http://127.0.0.1:${port}/status`).then(response => response.json());
   assert.deepEqual(status.viewer, {
-    type: "viewer-state", mode: "playing", sessionId: "episode-2", title: "episode-2",
+    type: "viewer-state", mode: "playing", sessionId: "episode-2", title: "episode-2", paused: false,
   });
   tv.close();
 });

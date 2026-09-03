@@ -36,6 +36,7 @@ function setup({ bootstrapPromise } = {}) {
     player: new FakeElement(),
     "status-title": new FakeElement(),
     "status-body": new FakeElement(),
+    "sound-prompt": new FakeElement(),
   };
   const frames = [];
   const document = {
@@ -146,4 +147,52 @@ test("TV idle cancels an unfinished player bootstrap", async () => {
   await Promise.resolve();
   assert.equal(frames.length, 0);
   assert.equal(elements.waiting.hidden, false);
+});
+
+test("blocked audible autoplay falls back to video with a one-action sound prompt", async () => {
+  const { elements, frames, intervals } = setup();
+  const socket = FakeSocket.instances[0];
+  socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: false });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  let playCalls = 0;
+  const video = {
+    readyState: 4,
+    paused: true,
+    muted: false,
+    play() {
+      playCalls += 1;
+      if (playCalls === 1) return Promise.reject(new Error("NotAllowedError"));
+      this.paused = false;
+      return Promise.resolve();
+    },
+  };
+  frames[0].contentWindow.document.querySelector = selector => selector === "video" ? video : null;
+  intervals[0]();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(playCalls, 2);
+  assert.equal(video.muted, true);
+  assert.equal(elements["sound-prompt"].hidden, false);
+  assert.equal(elements.waiting.hidden, true);
+
+  elements["sound-prompt"].listeners.get("click")();
+  await Promise.resolve();
+  assert.equal(video.muted, false);
+  assert.equal(elements["sound-prompt"].hidden, true);
+});
+
+test("a viewer joining while the TV is paused does not start playback", async () => {
+  const { frames, intervals } = setup();
+  const socket = FakeSocket.instances[0];
+  socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
+  await Promise.resolve();
+  await Promise.resolve();
+  let playCalls = 0;
+  frames[0].contentWindow.document.querySelector = selector => selector === "video"
+    ? { readyState: 4, paused: true, muted: false, play: () => { playCalls += 1; } }
+    : null;
+  intervals[0]();
+  assert.equal(playCalls, 0);
 });
