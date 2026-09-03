@@ -228,7 +228,7 @@ test("TV heartbeats correct browser drift and apply pause locally", async () => 
   assert.equal(pauseCalls, 1);
 });
 
-test("the selected English subtitle is attached through Jellyfin's VTT endpoint", async () => {
+test("the passive controller leaves subtitle and audio selection to Jellyfin", async () => {
   const { frames, intervals } = setup();
   const socket = FakeSocket.instances[0];
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
@@ -244,13 +244,7 @@ test("the selected English subtitle is attached through Jellyfin's VTT endpoint"
     tracks.push(element);
     return element;
   };
-  frameDocument.querySelector = selector => {
-    if (selector === "video") return video;
-    if (selector === "track[data-passive-viewer-subtitle]") {
-      return tracks.find(element => element.dataset.passiveViewerSubtitle === "true") || null;
-    }
-    return null;
-  };
+  frameDocument.querySelector = selector => selector === "video" ? video : null;
   const video = new FakeElement();
   video.ownerDocument = frameDocument;
   video.readyState = 4;
@@ -263,14 +257,5 @@ test("the selected English subtitle is attached through Jellyfin's VTT endpoint"
     itemId: "item-id", mediaSourceId: "source-id", subtitleIndex: 4,
   });
   intervals[0]();
-  const track = tracks.find(element => element.tagName === "TRACK");
-  assert.ok(track);
-  assert.equal(track.kind, "subtitles");
-  assert.equal(track.srclang, "en");
-  assert.equal(track.track.mode, "showing");
-  assert.equal(track.src, "/Videos/item-id/source-id/Subtitles/4/Stream.vtt?api_key=token");
-
-  track.track.mode = "disabled";
-  intervals[0]();
-  assert.equal(track.track.mode, "showing");
+  assert.equal(tracks.some(element => element.tagName === "TRACK"), false);
 });

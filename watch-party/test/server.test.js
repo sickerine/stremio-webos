@@ -155,13 +155,17 @@ test("viewer timing is broadcast without waiting for Jellyfin work", async () =>
   viewer.close();
 });
 
-test("viewer receives the selected subtitle track after media preparation", async () => {
+test("viewer state remains limited to TV playback timing after media preparation", async () => {
   const coordinator = {
     update: async () => ["queue"],
     status: () => ({ itemId: "item-id", state: null }),
   };
+  let trackLookups = 0;
   const jellyfin = {
-    subtitleTrackForItem: async () => ({ index: 4, mediaSourceId: "source-id" }),
+    subtitleTrackForItem: async () => {
+      trackLookups += 1;
+      return { index: 4, mediaSourceId: "source-id" };
+    },
   };
   const server = createBridgeServer({ coordinator, jellyfin });
   await server.listen(0, "127.0.0.1");
@@ -174,7 +178,7 @@ test("viewer receives the selected subtitle track after media preparation", asyn
   const tv = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv`);
   await new Promise((resolve, reject) => { tv.once("open", resolve); tv.once("error", reject); });
   const playing = nextMessage(viewer, "viewer-state");
-  const enriched = nextMatchingMessage(viewer, "subtitle metadata", message => message.itemId === "item-id");
+  const ack = nextMessage(tv, "ack");
   tv.send(JSON.stringify({
     type: "state",
     state: {
@@ -182,11 +186,12 @@ test("viewer receives the selected subtitle track after media preparation", asyn
       mediaUrl: "https://torbox.example/episode.mkv", title: "Episode 1",
     },
   }));
-  await playing;
-  const enrichedMessage = await enriched;
-  assert.equal(enrichedMessage.itemId, "item-id");
-  assert.equal(enrichedMessage.mediaSourceId, "source-id");
-  assert.equal(enrichedMessage.subtitleIndex, 4);
+  const message = await playing;
+  await ack;
+  assert.equal(trackLookups, 0);
+  assert.equal("itemId" in message, false);
+  assert.equal("mediaSourceId" in message, false);
+  assert.equal("subtitleIndex" in message, false);
   tv.close();
   viewer.close();
 });
