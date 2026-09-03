@@ -12,7 +12,9 @@ class FakeElement {
     this.dataset = {};
     this.classes = new Set();
     this.classList = {
+      add: name => this.classes.add(name),
       contains: name => this.classes.has(name),
+      remove: name => this.classes.delete(name),
       toggle: (name, force) => force ? this.classes.add(name) : this.classes.delete(name),
     };
   }
@@ -20,7 +22,6 @@ class FakeElement {
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this[name] = value; }
   addEventListener(name, listener) { this.listeners.set(name, listener); }
-  matches(selector) { return selector === ":hover" && Boolean(this.hovered); }
 }
 
 class FakeFrameDocument {
@@ -67,6 +68,7 @@ function setup({ bootstrapPromise } = {}) {
     "status-title": new FakeElement(),
     "status-body": new FakeElement(),
     "sound-prompt": new FakeElement(),
+    "cold-paused-hover-catcher": new FakeElement(),
   };
   const frames = [];
   const document = {
@@ -371,8 +373,8 @@ test("the passive player limits forced visibility to cold-paused hover", async (
   assert.doesNotMatch(style, /\.btnPause/);
 });
 
-test("hover exposes controls only before a paused video has played", async () => {
-  const { frames, intervals } = setup();
+test("the outer page exposes controls for a cold-paused video then hides them after idle", async () => {
+  const { elements, frames, intervals, timeouts } = setup();
   const socket = FakeSocket.instances[0];
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
   await Promise.resolve();
@@ -385,17 +387,18 @@ test("hover exposes controls only before a paused video has played", async () =>
     played: { length: 0 },
   };
   frameDocument.video = video;
-  frame.hovered = true;
   intervals[0]();
+  assert.equal(elements["cold-paused-hover-catcher"].hidden, false);
+
+  elements["cold-paused-hover-catcher"].listeners.get("mousemove")();
   assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), true);
 
-  frame.hovered = false;
-  intervals[0]();
+  timeouts.at(-1)();
   assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), false);
 
-  frame.hovered = true;
   video.played.length = 1;
   intervals[0]();
+  assert.equal(elements["cold-paused-hover-catcher"].hidden, true);
   assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), false);
 });
 

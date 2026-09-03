@@ -46,6 +46,14 @@ p { margin: 0; color: #92929a; font-size: clamp(14px, 2vw, 18px); }
 
 #player iframe { display: block; border: 0; }
 
+#cold-paused-hover-catcher {
+  position: fixed;
+  z-index: 1;
+  inset: 72px 0 112px;
+}
+
+#cold-paused-hover-catcher[hidden] { display: none; }
+
 #sound-prompt {
   position: fixed;
   z-index: 3;
