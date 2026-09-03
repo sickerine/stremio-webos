@@ -10,16 +10,23 @@ class FakeElement {
     this.style = {};
     this.listeners = new Map();
     this.dataset = {};
+    this.classes = new Set();
+    this.classList = {
+      contains: name => this.classes.has(name),
+      toggle: (name, force) => force ? this.classes.add(name) : this.classes.delete(name),
+    };
   }
   appendChild(child) { this.children.push(child); return child; }
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this[name] = value; }
   addEventListener(name, listener) { this.listeners.set(name, listener); }
+  matches(selector) { return selector === ":hover" && Boolean(this.hovered); }
 }
 
 class FakeFrameDocument {
   constructor() {
     this.head = new FakeElement();
+    this.documentElement = new FakeElement();
     this.listeners = new Map();
     this.video = null;
   }
@@ -36,13 +43,6 @@ class FakeFrameDocument {
       listener(event);
       if (event.immediatePropagationStopped) break;
     }
-  }
-  dispatchEvent(event) { this.dispatch(event.type, event); }
-}
-
-class FakePointerEvent {
-  constructor(type, options) {
-    Object.assign(this, options, { type, isTrusted: false });
   }
 }
 
@@ -77,7 +77,6 @@ function setup({ bootstrapPromise } = {}) {
       frame.contentWindow = {
         location: { hash: "#/home" },
         document: new FakeFrameDocument(),
-        PointerEvent: FakePointerEvent,
       };
       frames.push(frame);
       return frame;
@@ -346,7 +345,7 @@ test("the passive controller leaves subtitle and audio selection to Jellyfin", a
   assert.equal(tracks.some(element => element.tagName === "TRACK"), false);
 });
 
-test("the passive player leaves Jellyfin visibility alone and hides the back button", async () => {
+test("the passive player limits forced visibility to cold-paused hover", async () => {
   const { frames, intervals } = setup();
   const socket = FakeSocket.instances[0];
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
@@ -363,37 +362,41 @@ test("the passive player leaves Jellyfin visibility alone and hides the back but
   const style = frameDocument.getElementById("passive-viewer-restrictions").textContent;
   assert.match(style, /\.headerBackButton/);
   assert.match(style, /display:\s*none/);
-  assert.doesNotMatch(style, /\.skinHeader/);
-  assert.doesNotMatch(style, /\.videoOsdBottom/);
-  assert.doesNotMatch(style, /opacity/);
-  assert.doesNotMatch(style, /visibility/);
+  assert.match(style, /\.cold-paused-hover \.skinHeader/);
+  assert.match(style, /\.cold-paused-hover \.videoOsdBottom/);
+  assert.doesNotMatch(style, /^\s*\.skinHeader/m);
+  assert.doesNotMatch(style, /^\s*\.videoOsdBottom/m);
   assert.doesNotMatch(style, /pointer-events/);
   assert.doesNotMatch(style, /\.osdPositionSlider/);
   assert.doesNotMatch(style, /\.btnPause/);
 });
 
-test("mouse hover wakes Jellyfin controls without pinning them open", async () => {
+test("hover exposes controls only before a paused video has played", async () => {
   const { frames, intervals } = setup();
   const socket = FakeSocket.instances[0];
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
   await Promise.resolve();
   await Promise.resolve();
 
-  const frameDocument = frames[0].contentWindow.document;
-  frameDocument.video = {
+  const frame = frames[0];
+  const frameDocument = frame.contentWindow.document;
+  const video = {
     readyState: 4, duration: 1_400, currentTime: 20, paused: true, muted: false,
+    played: { length: 0 },
   };
-  const movement = [];
+  frameDocument.video = video;
+  frame.hovered = true;
   intervals[0]();
-  frameDocument.addEventListener("pointermove", event => movement.push(event));
+  assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), true);
 
-  frameDocument.dispatch("pointermove", {
-    type: "pointermove", isTrusted: true, pointerType: "mouse", clientX: 0, clientY: 40,
-  });
+  frame.hovered = false;
+  intervals[0]();
+  assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), false);
 
-  const synthetic = movement.filter(event => !event.isTrusted);
-  assert.deepEqual(synthetic.map(event => event.clientX), [0, 16]);
-  assert.equal(frameDocument.getElementById("passive-viewer-restrictions").textContent.includes("videoOsdBottom"), false);
+  frame.hovered = true;
+  video.played.length = 1;
+  intervals[0]();
+  assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), false);
 });
 
 test("playback mutations are rejected without blocking Jellyfin UI events", async () => {
