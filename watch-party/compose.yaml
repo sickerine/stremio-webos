@@ -31,7 +31,6 @@ services:
       JELLYFIN_URL: http://jellyfin:8096
       JELLYFIN_USERNAME: ${JELLYFIN_USERNAME:-watchparty}
       JELLYFIN_PASSWORD: ${JELLYFIN_PASSWORD:-watchparty}
-      WATCH_PARTY_ROOM: ${WATCH_PARTY_ROOM:-home}
     ports:
       - "3211:3211"
     volumes:

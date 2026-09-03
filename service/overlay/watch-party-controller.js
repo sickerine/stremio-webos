@@ -13,7 +13,6 @@
 
     var enabled = setting('watchPartyEnabled', '0') === '1';
     var serverUrl = setting('watchPartyUrl', '');
-    var room = setting('watchPartyRoom', 'home');
     var socket = null;
     var video = null;
     var mediaUrl = null;
@@ -124,7 +123,7 @@
         if (!enabled || !serverUrl) return;
         clearTimeout(reconnectTimer);
         var separator = serverUrl.indexOf('?') >= 0 ? '&' : '?';
-        try { socket = new WebSocket(serverUrl + separator + 'room=' + encodeURIComponent(room) + '&role=tv'); }
+        try { socket = new WebSocket(serverUrl + separator + 'role=tv'); }
         catch (error) { reconnectTimer = setTimeout(connect, 2000); return; }
         socket.addEventListener('open', publish);
         socket.addEventListener('close', function () {
@@ -148,7 +147,6 @@
                 connected: Boolean(socket && socket.readyState === WebSocket.OPEN),
                 enabled: enabled,
                 mediaUrl: mediaUrl,
-                room: room,
                 serverUrl: serverUrl,
                 sessionId: sessionId
             };
