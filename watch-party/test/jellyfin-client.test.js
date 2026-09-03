@@ -32,12 +32,6 @@ test("initialization completes a fresh server, authenticates, and enables Englis
   assert.equal(userConfiguration.SubtitleMode, "Always");
   assert.equal(userConfiguration.SubtitleLanguagePreference, "eng");
   assert.equal(userConfiguration.RememberSubtitleSelections, true);
-  assert.deepEqual(client.viewerSession(), {
-    serverId: "server-id",
-    userId: "user-id",
-    accessToken: "token",
-    user: { Id: "user-id", Configuration: { SubtitleMode: "Default" } },
-  });
 });
 
 test("browser sessions receive direct play, pause, resume, and seek commands", async () => {
@@ -129,4 +123,24 @@ test("a browser item is started once even while loading or after playback ends",
   assert.equal(playCalls.length, 2);
   assert.match(playCalls[0].url, /itemIds=item-a/);
   assert.match(playCalls[1].url, /itemIds=item-b/);
+});
+
+test("each passive browser receives its own Jellyfin device session", async () => {
+  const calls = [];
+  const client = createJellyfinClient({
+    baseUrl: "http://jellyfin.test",
+    fetchImplementation: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({
+        ServerId: "server-id", AccessToken: "viewer-token",
+        User: { Id: "user-id", Name: "watchparty" },
+      });
+    },
+  });
+  assert.deepEqual(await client.createViewerSession("viewer-device-123"), {
+    serverId: "server-id", userId: "user-id", accessToken: "viewer-token",
+    user: { Id: "user-id", Name: "watchparty" },
+  });
+  assert.match(calls[0].options.headers.get("authorization"), /Client="Jellyfin Web"/);
+  assert.match(calls[0].options.headers.get("authorization"), /DeviceId="viewer-device-123"/);
 });

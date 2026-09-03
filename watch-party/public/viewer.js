@@ -23,6 +23,7 @@ export function createPassiveViewer(options = {}) {
   const setTimeoutImplementation = options.setTimeoutImplementation;
   const clearTimeoutImplementation = options.clearTimeoutImplementation;
   const now = options.now || Date.now;
+  const createDeviceId = options.createDeviceId;
 
   const waiting = document.getElementById("waiting");
   const player = document.getElementById("player");
@@ -36,6 +37,8 @@ export function createPassiveViewer(options = {}) {
   let socket = null;
   let reconnectTimer = null;
   let stopped = false;
+  const viewerDeviceId = storage.getItem("stremio-watch-device-id") || createDeviceId();
+  storage.setItem("stremio-watch-device-id", viewerDeviceId);
 
   function setStatus(title, body) {
     statusTitle.textContent = title;
@@ -66,6 +69,7 @@ export function createPassiveViewer(options = {}) {
     }
     const address = location.origin;
     storage.setItem("enableAutoLogin", "true");
+    storage.setItem("_deviceId2", viewerDeviceId);
     storage.setItem(`user-${session.userId}-${session.serverId}`, JSON.stringify(session.user));
     storage.setItem("jellyfin_credentials", JSON.stringify({
       Servers: [{
@@ -107,14 +111,12 @@ export function createPassiveViewer(options = {}) {
         const video = frameDocument?.querySelector("video");
         hardenPlayer(frameDocument);
         if (!frameWindow?.location.hash.startsWith("#/video") || !video || video.readyState < 2) {
-          player.hidden = true;
           setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
           return;
         }
         waiting.hidden = true;
         player.hidden = false;
       } catch (error) {
-        player.hidden = true;
         setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
       }
     }, 250);
@@ -127,7 +129,10 @@ export function createPassiveViewer(options = {}) {
     const bootGeneration = ++generation;
     setStatus("Connecting to the TV", message.title || "Preparing the current stream and subtitles.");
     try {
-      const response = await fetchImplementation("/api/viewer-session", { cache: "no-store" });
+      const response = await fetchImplementation("/api/viewer-session", {
+        cache: "no-store",
+        headers: { "x-viewer-device-id": viewerDeviceId },
+      });
       if (!response.ok) throw new Error(`Viewer session failed (${response.status})`);
       const session = await response.json();
       if (bootGeneration !== generation || activeSessionId !== message.sessionId) return;
@@ -140,7 +145,7 @@ export function createPassiveViewer(options = {}) {
       frame = nextFrame;
       bootingSessionId = null;
       player.replaceChildren(nextFrame);
-      player.hidden = true;
+      player.hidden = false;
       watchFrame(nextFrame);
     } catch (error) {
       if (bootGeneration !== generation) return;
@@ -203,5 +208,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     clearIntervalImplementation: clearInterval,
     setTimeoutImplementation: setTimeout,
     clearTimeoutImplementation: clearTimeout,
+    createDeviceId: () => `stremio-watch-${crypto.randomUUID()}`,
   });
 }

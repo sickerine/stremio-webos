@@ -127,7 +127,7 @@ test("the public URL serves the passive viewer and provisions Jellyfin without a
   };
   const server = createBridgeServer({
     coordinator: { status: () => null },
-    jellyfin: { viewerSession: () => viewerSession },
+    jellyfin: { createViewerSession: async deviceId => ({ ...viewerSession, deviceId }) },
   });
   await server.listen(0, "127.0.0.1");
   servers.push(server);
@@ -138,9 +138,13 @@ test("the public URL serves the passive viewer and provisions Jellyfin without a
   assert.match(page.headers.get("content-type"), /text\/html/);
   assert.match(await page.text(), /Waiting for the TV/);
 
-  const bootstrap = await fetch(`${origin}/api/viewer-session`);
+  const missingDevice = await fetch(`${origin}/api/viewer-session`);
+  assert.equal(missingDevice.status, 400);
+  const bootstrap = await fetch(`${origin}/api/viewer-session`, {
+    headers: { "x-viewer-device-id": "viewer-device-123" },
+  });
   assert.equal(bootstrap.status, 200);
-  assert.deepEqual(await bootstrap.json(), viewerSession);
+  assert.deepEqual(await bootstrap.json(), { ...viewerSession, deviceId: "viewer-device-123" });
 });
 
 test("Jellyfin is available only inside the passive shell", async () => {
@@ -152,7 +156,7 @@ test("Jellyfin is available only inside the passive shell", async () => {
   const target = `http://127.0.0.1:${backend.address().port}`;
   const server = createBridgeServer({
     coordinator: { status: () => null },
-    jellyfin: { viewerSession: () => ({}) },
+    jellyfin: { createViewerSession: async () => ({}) },
     jellyfinProxy: createJellyfinProxy({ target }),
   });
   await server.listen(0, "127.0.0.1");

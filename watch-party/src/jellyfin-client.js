@@ -1,12 +1,18 @@
 const CLIENT_NAME = "Stremio TV Bridge";
 const CLIENT_VERSION = "1.0.0";
 
-function authorizationHeader(deviceId, token = "") {
+function authorizationHeader(
+  deviceId,
+  token = "",
+  clientName = CLIENT_NAME,
+  deviceName = "LG webOS TV",
+  clientVersion = CLIENT_VERSION,
+) {
   const fields = [
-    `Client="${CLIENT_NAME}"`,
-    'Device="LG webOS TV"',
+    `Client="${clientName}"`,
+    `Device="${deviceName}"`,
     `DeviceId="${deviceId}"`,
-    `Version="${CLIENT_VERSION}"`,
+    `Version="${clientVersion}"`,
   ];
   if (token) fields.push(`Token="${token}"`);
   return `MediaBrowser ${fields.join(", ")}`;
@@ -21,7 +27,6 @@ export function createJellyfinClient(options = {}) {
   const fetchImplementation = options.fetchImplementation || fetch;
   let accessToken = "";
   let user = null;
-  let serverId = "";
   const browserAssignments = new Map();
 
   async function request(pathname, requestOptions = {}) {
@@ -76,7 +81,27 @@ export function createJellyfinClient(options = {}) {
     });
     accessToken = result.AccessToken;
     user = result.User;
-    serverId = result.ServerId;
+  }
+
+  async function createViewerSession(viewerDeviceId) {
+    const headers = new Headers({
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: authorizationHeader(viewerDeviceId, "", "Jellyfin Web", "Browser", "10.11.11"),
+    });
+    const response = await fetchImplementation(`${baseUrl}/Users/AuthenticateByName`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ Username: username, Pw: password }),
+    });
+    if (!response.ok) throw new Error(`Jellyfin viewer authentication failed (${response.status})`);
+    const result = await response.json();
+    return {
+      serverId: result.ServerId,
+      userId: result.User.Id,
+      accessToken: result.AccessToken,
+      user: result.User,
+    };
   }
 
   async function configureUser() {
@@ -182,9 +207,7 @@ export function createJellyfinClient(options = {}) {
     refreshLibrary,
     findItemByPath,
     syncViewers,
-    viewerSession() {
-      return { serverId, userId: user?.Id || "", accessToken, user };
-    },
+    createViewerSession,
     status() { return { authenticated: Boolean(accessToken), userId: user?.Id || null }; },
   };
 }

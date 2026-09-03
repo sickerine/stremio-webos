@@ -86,8 +86,20 @@ export function createBridgeServer({
       return;
     }
     if (request.method === "GET" && requestUrl.pathname === "/api/viewer-session") {
-      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end(JSON.stringify(jellyfin.viewerSession()));
+      const viewerDeviceId = request.headers["x-viewer-device-id"];
+      if (typeof viewerDeviceId !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(viewerDeviceId)) {
+        response.writeHead(400, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ error: "invalid-viewer-device" }));
+        return;
+      }
+      try {
+        const session = await jellyfin.createViewerSession(viewerDeviceId);
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify(session));
+      } catch (error) {
+        response.writeHead(502, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ error: "viewer-session-failed" }));
+      }
       return;
     }
     if (request.method === "GET" && request.url === "/health") {
