@@ -30,3 +30,22 @@ test("media library atomically publishes a strm without deleting an active queue
   assert.equal(await readFile(indexedPath, "utf8"), "https://torbox.example/real.mkv\n");
   assert.deepEqual((await readdir(mediaRoot)).sort(), [path.basename(indexedPath), "obsolete.strm"].sort());
 });
+
+test("an unchanged indexed stream is reused without refreshing Jellyfin", async () => {
+  const mediaRoot = await mkdtemp(path.join(tmpdir(), "watch-party-library-"));
+  temporaryDirectories.push(mediaRoot);
+  const mediaUrl = "https://torbox.example/real.mkv";
+  let refreshes = 0;
+  const jellyfin = {
+    refreshLibrary: async () => { refreshes += 1; },
+    findItemByPath: async () => ({ Id: "existing-item" }),
+  };
+  const library = createMediaLibrary({ jellyfin, mediaRoot });
+  const first = await library.importStream({ mediaUrl });
+  assert.equal(first.Id, "existing-item");
+  assert.equal(refreshes, 1);
+
+  const second = await library.importStream({ mediaUrl });
+  assert.equal(second.Id, "existing-item");
+  assert.equal(refreshes, 1);
+});

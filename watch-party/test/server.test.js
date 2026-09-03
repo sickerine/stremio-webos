@@ -9,18 +9,22 @@ import { createBridgeServer, normalizeState } from "../src/server.js";
 const servers = [];
 afterEach(async () => Promise.all(servers.splice(0).map(server => server.close())));
 
-function nextMessage(socket, type) {
+function nextMatchingMessage(socket, label, predicate) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${type}`)), 1_000);
+    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 1_000);
     const listener = data => {
       const message = JSON.parse(data.toString());
-      if (message.type !== type) return;
+      if (!predicate(message)) return;
       clearTimeout(timeout);
       socket.off("message", listener);
       resolve(message);
     };
     socket.on("message", listener);
   });
+}
+
+function nextMessage(socket, type) {
+  return nextMatchingMessage(socket, type, message => message.type === type);
 }
 
 test("normalization rejects states without a playable HTTP source", () => {
@@ -170,6 +174,7 @@ test("viewer receives the selected subtitle track after media preparation", asyn
   const tv = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv`);
   await new Promise((resolve, reject) => { tv.once("open", resolve); tv.once("error", reject); });
   const playing = nextMessage(viewer, "viewer-state");
+  const enriched = nextMatchingMessage(viewer, "subtitle metadata", message => message.itemId === "item-id");
   tv.send(JSON.stringify({
     type: "state",
     state: {
@@ -178,10 +183,10 @@ test("viewer receives the selected subtitle track after media preparation", asyn
     },
   }));
   await playing;
-  const enriched = await nextMessage(viewer, "viewer-state");
-  assert.equal(enriched.itemId, "item-id");
-  assert.equal(enriched.mediaSourceId, "source-id");
-  assert.equal(enriched.subtitleIndex, 4);
+  const enrichedMessage = await enriched;
+  assert.equal(enrichedMessage.itemId, "item-id");
+  assert.equal(enrichedMessage.mediaSourceId, "source-id");
+  assert.equal(enrichedMessage.subtitleIndex, 4);
   tv.close();
   viewer.close();
 });
