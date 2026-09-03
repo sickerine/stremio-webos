@@ -48,6 +48,8 @@ export function createPassiveViewer(options = {}) {
   let activeSessionId = null;
   let bootingSessionId = null;
   let tvPaused = true;
+  let tvPositionSeconds = null;
+  let tvPositionReceivedAtMs = 0;
   let autoplayAttempt = null;
   let generation = 0;
   let socket = null;
@@ -77,6 +79,7 @@ export function createPassiveViewer(options = {}) {
     generation += 1;
     activeSessionId = null;
     bootingSessionId = null;
+    tvPositionSeconds = null;
     clearFrame();
     setStatus(title, body);
   }
@@ -135,6 +138,22 @@ export function createPassiveViewer(options = {}) {
       .finally(() => { autoplayAttempt = null; });
   }
 
+  function synchronizeVideo(video) {
+    if (Number.isFinite(tvPositionSeconds)) {
+      const elapsedSeconds = tvPaused ? 0 : Math.max(0, now() - tvPositionReceivedAtMs) / 1_000;
+      const target = tvPositionSeconds + elapsedSeconds;
+      if (Number.isFinite(video.duration)) {
+        const boundedTarget = Math.min(target, Math.max(0, video.duration - 0.25));
+        if (Math.abs(video.currentTime - boundedTarget) >= 1.5) video.currentTime = boundedTarget;
+      }
+    }
+    if (tvPaused) {
+      if (!video.paused) video.pause();
+      return;
+    }
+    ensurePlaying(video);
+  }
+
   function hardenPlayer(frameDocument) {
     if (!frameDocument || frameDocument.getElementById?.("passive-viewer-restrictions")) return;
     const style = frameDocument.createElement?.("style");
@@ -165,7 +184,7 @@ export function createPassiveViewer(options = {}) {
           setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
           return;
         }
-        ensurePlaying(video);
+        synchronizeVideo(video);
         waiting.hidden = true;
         player.hidden = false;
       } catch (error) {
@@ -210,6 +229,10 @@ export function createPassiveViewer(options = {}) {
     if (message?.type !== "viewer-state") return;
     if (message.mode === "playing" && message.sessionId) {
       tvPaused = Boolean(message.paused);
+      if (Number.isFinite(message.positionSeconds)) {
+        tvPositionSeconds = message.positionSeconds;
+        tvPositionReceivedAtMs = now();
+      }
       showPlaying(message);
       return;
     }
