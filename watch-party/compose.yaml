@@ -1,0 +1,24 @@
+name: stremio-watch-party
+
+services:
+  watch-party:
+    build: .
+    container_name: stremio-watch-party
+    init: true
+    ports:
+      - "3210:3210"
+    volumes:
+      - watch-party-media:/data/media
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3210/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  watch-party-media:

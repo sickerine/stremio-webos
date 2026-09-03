@@ -1,0 +1,14 @@
+{
+  "name": "stremio-watch-party",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "hls.js": "^1.6.13",
+    "ws": "^8.18.3"
+  }
+}
