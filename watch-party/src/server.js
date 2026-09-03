@@ -198,6 +198,20 @@ export function createBridgeServer({
       broadcastViewerState();
       try {
         const actions = await activeCoordinator.update(state);
+        const itemId = activeCoordinator.status()?.itemId;
+        const subtitleTrack = itemId && jellyfin?.subtitleTrackForItem
+          ? await jellyfin.subtitleTrackForItem(itemId)
+          : null;
+        if (viewerState.mode === "playing" && viewerState.sessionId === state.sessionId
+            && (viewerState.itemId !== itemId || viewerState.subtitleIndex !== subtitleTrack?.index)) {
+          viewerState = {
+            ...viewerState,
+            itemId,
+            mediaSourceId: subtitleTrack?.mediaSourceId || itemId,
+            subtitleIndex: subtitleTrack?.index ?? null,
+          };
+          broadcastViewerState();
+        }
         socket.send(JSON.stringify({ type: "ack", sequence: state.sequence, actions }));
       } catch (error) {
         lastError = error;

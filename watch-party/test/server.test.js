@@ -151,6 +151,41 @@ test("viewer timing is broadcast without waiting for Jellyfin work", async () =>
   viewer.close();
 });
 
+test("viewer receives the selected subtitle track after media preparation", async () => {
+  const coordinator = {
+    update: async () => ["queue"],
+    status: () => ({ itemId: "item-id", state: null }),
+  };
+  const jellyfin = {
+    subtitleTrackForItem: async () => ({ index: 4, mediaSourceId: "source-id" }),
+  };
+  const server = createBridgeServer({ coordinator, jellyfin });
+  await server.listen(0, "127.0.0.1");
+  servers.push(server);
+  const port = server.address().port;
+  const viewer = new WebSocket(`ws://127.0.0.1:${port}/ws?role=viewer`);
+  const initial = nextMessage(viewer, "viewer-state");
+  await new Promise((resolve, reject) => { viewer.once("open", resolve); viewer.once("error", reject); });
+  await initial;
+  const tv = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv`);
+  await new Promise((resolve, reject) => { tv.once("open", resolve); tv.once("error", reject); });
+  const playing = nextMessage(viewer, "viewer-state");
+  tv.send(JSON.stringify({
+    type: "state",
+    state: {
+      sessionId: "episode-1", sequence: 1, positionSeconds: 12, paused: false,
+      mediaUrl: "https://torbox.example/episode.mkv", title: "Episode 1",
+    },
+  }));
+  await playing;
+  const enriched = await nextMessage(viewer, "viewer-state");
+  assert.equal(enriched.itemId, "item-id");
+  assert.equal(enriched.mediaSourceId, "source-id");
+  assert.equal(enriched.subtitleIndex, 4);
+  tv.close();
+  viewer.close();
+});
+
 test("the public URL serves the passive viewer and provisions Jellyfin without a login", async () => {
   const viewerSession = {
     serverId: "server-id", userId: "user-id", accessToken: "access-token",

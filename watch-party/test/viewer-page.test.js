@@ -9,6 +9,7 @@ class FakeElement {
     this.children = [];
     this.style = {};
     this.listeners = new Map();
+    this.dataset = {};
   }
   appendChild(child) { this.children.push(child); return child; }
   replaceChildren(...children) { this.children = children; }
@@ -225,4 +226,41 @@ test("TV heartbeats correct browser drift and apply pause locally", async () => 
   assert.equal(video.currentTime, 45);
   assert.equal(video.paused, true);
   assert.equal(pauseCalls, 1);
+});
+
+test("the selected English subtitle is attached through Jellyfin's VTT endpoint", async () => {
+  const { frames, intervals } = setup();
+  const socket = FakeSocket.instances[0];
+  socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const tracks = [];
+  const frameDocument = frames[0].contentWindow.document;
+  frameDocument.createElement = tag => {
+    const element = new FakeElement();
+    element.tagName = tag.toUpperCase();
+    if (tag === "track") element.track = { mode: "disabled" };
+    tracks.push(element);
+    return element;
+  };
+  frameDocument.querySelector = selector => selector === "video" ? video : null;
+  const video = new FakeElement();
+  video.ownerDocument = frameDocument;
+  video.readyState = 4;
+  video.duration = 1_400;
+  video.currentTime = 20;
+  video.paused = true;
+
+  socket.message({
+    type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true,
+    itemId: "item-id", mediaSourceId: "source-id", subtitleIndex: 4,
+  });
+  intervals[0]();
+  const track = tracks.find(element => element.tagName === "TRACK");
+  assert.ok(track);
+  assert.equal(track.kind, "subtitles");
+  assert.equal(track.srclang, "en");
+  assert.equal(track.track.mode, "showing");
+  assert.equal(track.src, "/Videos/item-id/source-id/Subtitles/4/Stream.vtt?api_key=token");
 });
