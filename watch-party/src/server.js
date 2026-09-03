@@ -195,6 +195,7 @@ export function createBridgeServer({
           sessionId: state.sessionId,
           title: state.title,
           paused: state.paused,
+          positionSeconds: state.positionSeconds,
         };
         broadcastViewerState();
         socket.send(JSON.stringify({ type: "ack", sequence: state.sequence, actions }));

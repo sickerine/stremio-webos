@@ -196,3 +196,33 @@ test("a viewer joining while the TV is paused does not start playback", async ()
   intervals[0]();
   assert.equal(playCalls, 0);
 });
+
+test("TV heartbeats correct browser drift and apply pause locally", async () => {
+  const { frames, intervals } = setup();
+  const socket = FakeSocket.instances[0];
+  socket.message({
+    type: "viewer-state", mode: "playing", sessionId: "episode-1",
+    paused: false, positionSeconds: 30,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  let pauseCalls = 0;
+  const video = {
+    readyState: 4, duration: 1_400, currentTime: 20, paused: false, muted: false,
+    pause() { pauseCalls += 1; this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); },
+  };
+  frames[0].contentWindow.document.querySelector = selector => selector === "video" ? video : null;
+  intervals[0]();
+  assert.ok(video.currentTime >= 30 && video.currentTime < 30.1);
+
+  socket.message({
+    type: "viewer-state", mode: "playing", sessionId: "episode-1",
+    paused: true, positionSeconds: 45,
+  });
+  intervals[0]();
+  assert.equal(video.currentTime, 45);
+  assert.equal(video.paused, true);
+  assert.equal(pauseCalls, 1);
+});
