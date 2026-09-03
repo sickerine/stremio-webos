@@ -141,7 +141,22 @@ test("a fresh viewer needs no login and reveals only active TV video", async () 
   socket.message({ type: "viewer-state", mode: "waiting" });
   assert.equal(elements.waiting.hidden, false);
   assert.equal(elements.player.hidden, true);
-  assert.equal(elements.player.children.length, 0);
+  assert.equal(elements.player.children.length, 1, "the ready Jellyfin frame stays warm while hidden");
+});
+
+test("Jellyfin warms up before the TV starts playing", async () => {
+  const { elements, frames, values, intervals } = setup();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].src, "/web/#/video");
+  assert.match(values.get("jellyfin_credentials"), /"AccessToken":"token"/);
+  assert.equal(elements.waiting.hidden, false);
+  assert.equal(elements.player.hidden, true);
+
+  intervals[0]();
+  assert.equal(elements.waiting.hidden, false, "a ready background frame does not leave waiting mode");
 });
 
 test("duplicate TV heartbeats do not recreate the player", async () => {
@@ -159,7 +174,7 @@ test("duplicate TV heartbeats do not recreate the player", async () => {
   assert.equal(frames.length, 1, "episode changes reuse the ready Jellyfin player");
 });
 
-test("TV idle cancels an unfinished player bootstrap", async () => {
+test("TV idle lets an unfinished player bootstrap complete in the background", async () => {
   let finishBootstrap;
   const bootstrapPromise = new Promise(resolve => { finishBootstrap = resolve; });
   const { elements, frames, bootstrap } = setup({ bootstrapPromise });
@@ -167,10 +182,10 @@ test("TV idle cancels an unfinished player bootstrap", async () => {
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", title: "Episode 1" });
   socket.message({ type: "viewer-state", mode: "waiting" });
   finishBootstrap(bootstrap);
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(frames.length, 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(frames.length, 1);
   assert.equal(elements.waiting.hidden, false);
+  assert.equal(elements.player.hidden, true);
 });
 
 test("blocked audible autoplay falls back to video with a one-action sound prompt", async () => {

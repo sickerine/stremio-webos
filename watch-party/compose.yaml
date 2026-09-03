@@ -3,7 +3,7 @@ name: stremio-watch-party
 services:
   jellyfin:
     build: ./jellyfin
-    image: stremio-watch-party-jellyfin:10.11.11-subtitle-extract-v7
+    image: stremio-watch-party-jellyfin:10.11.11-watch-v1
     container_name: stremio-watch-party-jellyfin
     init: true
     volumes:
