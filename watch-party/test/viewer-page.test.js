@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createPassiveViewer } from "../public/viewer.js";
+import { createBrowserDeviceId, createPassiveViewer } from "../public/viewer.js";
 
 class FakeElement {
   constructor() {
@@ -73,6 +73,21 @@ function setup({ bootstrapPromise } = {}) {
   });
   return { controller, elements, frames, values, intervals, timeouts, bootstrap };
 }
+
+test("device IDs work on LAN HTTP origins without crypto.randomUUID", () => {
+  const values = Array.from({ length: 16 }, (_, index) => index);
+  const cryptoImplementation = {
+    getRandomValues(buffer) {
+      buffer.set(values);
+      return buffer;
+    },
+  };
+
+  assert.equal(
+    createBrowserDeviceId(cryptoImplementation),
+    "stremio-watch-00010203-0405-4607-8809-0a0b0c0d0e0f",
+  );
+});
 
 test("a fresh viewer needs no login and reveals only active TV video", async () => {
   const { elements, frames, values, intervals } = setup();
