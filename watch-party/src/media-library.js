@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 function mediaKey(mediaUrl) {
@@ -12,10 +12,22 @@ export function createMediaLibrary({ jellyfin, mediaRoot = "/media", pollInterva
     const filename = `${key}.strm`;
     const finalPath = path.join(mediaRoot, filename);
     const temporaryPath = `${finalPath}.tmp`;
+    const contents = `${state.mediaUrl}\n`;
 
     await mkdir(mediaRoot, { recursive: true });
-    await writeFile(temporaryPath, `${state.mediaUrl}\n`, "utf8");
-    await rename(temporaryPath, finalPath);
+    let unchanged = false;
+    try { unchanged = await readFile(finalPath, "utf8") === contents; }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+
+    if (unchanged) {
+      const existingItem = await jellyfin.findItemByPath(finalPath);
+      if (existingItem) return existingItem;
+    } else {
+      await writeFile(temporaryPath, contents, "utf8");
+      await rename(temporaryPath, finalPath);
+    }
     await jellyfin.refreshLibrary();
 
     for (let attempt = 0; attempt < maxPolls; attempt += 1) {

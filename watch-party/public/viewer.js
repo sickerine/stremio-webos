@@ -15,7 +15,7 @@ const PLAYER_RESTRICTIONS = `
     color: white;
     background: rgb(0 0 0 / 78%);
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 1.15em;
+    font-size: clamp(18px, 3.2vh, 38px);
     line-height: 1.25;
   }
 `;
