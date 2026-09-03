@@ -55,6 +55,7 @@ export function createPassiveViewer(options = {}) {
   let frameMonitor = null;
   let frameBootstrap = null;
   let activeSessionId = null;
+  let activeSessionHasPlayed = false;
   let tvPaused = true;
   let tvPositionSeconds = null;
   let tvPositionReceivedAtMs = 0;
@@ -91,6 +92,7 @@ export function createPassiveViewer(options = {}) {
 
   function showWaiting(title = "Waiting for the TV", body = "Playback will appear here automatically.") {
     activeSessionId = null;
+    activeSessionHasPlayed = false;
     tvPositionSeconds = null;
     autoplayAttempt = null;
     if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
@@ -277,7 +279,7 @@ export function createPassiveViewer(options = {}) {
   }
 
   function syncColdPausedHover(frameDocument, video) {
-    const coldPaused = Boolean(activeSessionId && video?.paused && video.played?.length === 0);
+    const coldPaused = Boolean(activeSessionId && !activeSessionHasPlayed && video?.paused);
     coldPausedHoverCatcher.hidden = !coldPaused;
     if (!coldPaused) {
       if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
@@ -341,6 +343,8 @@ export function createPassiveViewer(options = {}) {
 
   async function showPlaying(message) {
     const sessionChanged = activeSessionId !== message.sessionId;
+    if (sessionChanged) activeSessionHasPlayed = !message.paused;
+    else if (!message.paused) activeSessionHasPlayed = true;
     activeSessionId = message.sessionId;
     if (sessionChanged || !frame) {
       setStatus("Connecting to the TV", message.title || "Preparing the current stream.");
