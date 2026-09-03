@@ -10,8 +10,33 @@ const PLAYER_RESTRICTIONS = `
   .btnPause,
   .btnFastForward,
   .btnUserRating,
-  .osdPositionSliderContainer { display: none !important; }
+  .osdPositionSlider {
+    pointer-events: none !important;
+    touch-action: none !important;
+  }
 `;
+
+const BLOCKED_PLAYBACK_KEYS = new Set([
+  " ", "k", "j", "l", "arrowleft", "arrowright", "pagedown", "pageup",
+  "home", "end", "navigationleft", "navigationright", "gamepaddpadleft",
+  "gamepaddpadright", "gamepadleftthumbstickleft", "gamepadleftthumbstickright",
+  "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+]);
+
+const SEEK_CONTROL_EVENTS = ["pointerdown", "mousedown", "touchstart", "click", "input", "change"];
+
+export function isBlockedPlaybackKey(key) {
+  return BLOCKED_PLAYBACK_KEYS.has(String(key || "").toLowerCase());
+}
+
+function isPositionSlider(target) {
+  return Boolean(target?.matches?.(".osdPositionSlider") || target?.closest?.(".osdPositionSlider"));
+}
+
+function blockEvent(event) {
+  event.preventDefault?.();
+  event.stopImmediatePropagation?.();
+}
 
 export function createBrowserDeviceId(cryptoImplementation) {
   if (typeof cryptoImplementation.randomUUID === "function") {
@@ -156,21 +181,33 @@ export function createPassiveViewer(options = {}) {
   }
 
   function hardenPlayer(frameDocument) {
-    if (!frameDocument || frameDocument.getElementById?.("passive-viewer-restrictions")) return;
-    const style = frameDocument.createElement?.("style");
-    if (style) {
-      style.id = "passive-viewer-restrictions";
-      style.textContent = PLAYER_RESTRICTIONS;
-      frameDocument.head?.appendChild(style);
-    }
-    frameDocument.addEventListener?.("keydown", event => {
-      enableSound();
-      if ([" ", "k", "j", "l", "arrowleft", "arrowright", "pagedown", "pageup"].includes(event.key.toLowerCase())) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
+    if (!frameDocument) return;
+    if (!frameDocument.getElementById?.("passive-viewer-restrictions")) {
+      const style = frameDocument.createElement?.("style");
+      if (style) {
+        style.id = "passive-viewer-restrictions";
+        style.textContent = PLAYER_RESTRICTIONS;
+        frameDocument.head?.appendChild(style);
       }
-    }, true);
-    frameDocument.addEventListener?.("pointerdown", enableSound, true);
+      frameDocument.addEventListener?.("keydown", event => {
+        enableSound();
+        if (isPositionSlider(event.target) || isBlockedPlaybackKey(event.key)) blockEvent(event);
+      }, true);
+      for (const eventName of SEEK_CONTROL_EVENTS) {
+        frameDocument.addEventListener?.(eventName, event => {
+          if (!isPositionSlider(event.target)) return;
+          enableSound();
+          blockEvent(event);
+        }, true);
+      }
+      frameDocument.addEventListener?.("pointerdown", enableSound, true);
+    }
+
+    for (const slider of frameDocument.querySelectorAll?.(".osdPositionSlider") || []) {
+      slider.tabIndex = -1;
+      slider.setAttribute?.("aria-disabled", "true");
+      slider.classList?.remove?.("focusable");
+    }
   }
 
   function watchFrame(nextFrame) {

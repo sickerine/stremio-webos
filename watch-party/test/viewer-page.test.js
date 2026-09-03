@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createBrowserDeviceId, createPassiveViewer } from "../public/viewer.js";
+import { createBrowserDeviceId, createPassiveViewer, isBlockedPlaybackKey } from "../public/viewer.js";
 
 class FakeElement {
   constructor() {
@@ -15,6 +15,30 @@ class FakeElement {
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this[name] = value; }
   addEventListener(name, listener) { this.listeners.set(name, listener); }
+}
+
+class FakeFrameDocument {
+  constructor() {
+    this.head = new FakeElement();
+    this.listeners = new Map();
+    this.sliders = [];
+    this.video = null;
+  }
+  getElementById(id) { return this.head.children.find(child => child.id === id) || null; }
+  createElement() { return new FakeElement(); }
+  querySelector(selector) { return selector === "video" ? this.video : null; }
+  querySelectorAll(selector) { return selector === ".osdPositionSlider" ? this.sliders : []; }
+  addEventListener(name, listener) {
+    const listeners = this.listeners.get(name) || [];
+    listeners.push(listener);
+    this.listeners.set(name, listeners);
+  }
+  dispatch(name, event) {
+    for (const listener of this.listeners.get(name) || []) {
+      listener(event);
+      if (event.immediatePropagationStopped) break;
+    }
+  }
 }
 
 class FakeSocket {
@@ -47,7 +71,7 @@ function setup({ bootstrapPromise } = {}) {
       const frame = new FakeElement();
       frame.contentWindow = {
         location: { hash: "#/home" },
-        document: { head: new FakeElement(), querySelector: () => null, addEventListener() {} },
+        document: new FakeFrameDocument(),
       };
       frames.push(frame);
       return frame;
@@ -257,4 +281,75 @@ test("the passive controller leaves subtitle and audio selection to Jellyfin", a
   });
   intervals[0]();
   assert.equal(tracks.some(element => element.tagName === "TRACK"), false);
+});
+
+test("the passive player blocks every normal seek route but leaves track menus interactive", async () => {
+  const { frames, intervals } = setup();
+  const socket = FakeSocket.instances[0];
+  socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const frameDocument = frames[0].contentWindow.document;
+  const video = {
+    readyState: 4, duration: 1_400, currentTime: 20, paused: true, muted: false,
+  };
+  frameDocument.video = video;
+
+  const slider = new FakeElement();
+  slider.matches = selector => selector === ".osdPositionSlider";
+  slider.closest = selector => selector === ".osdPositionSlider" ? slider : null;
+  slider.classList = { remove(name) { slider.removedClass = name; } };
+  frameDocument.sliders.push(slider);
+  intervals[0]();
+
+  assert.equal(slider.tabIndex, -1);
+  assert.equal(slider["aria-disabled"], "true");
+  assert.equal(slider.removedClass, "focusable");
+  assert.match(
+    frameDocument.getElementById("passive-viewer-restrictions").textContent,
+    /\.osdPositionSlider/,
+  );
+
+  const seekEvent = {
+    target: slider,
+    preventDefault() { this.defaultPrevented = true; },
+    stopImmediatePropagation() { this.immediatePropagationStopped = true; },
+  };
+  frameDocument.dispatch("pointerdown", seekEvent);
+  assert.equal(seekEvent.defaultPrevented, true);
+  assert.equal(seekEvent.immediatePropagationStopped, true);
+
+  const trackMenuButton = {
+    matches: () => false,
+    closest: () => null,
+  };
+  const trackMenuEvent = {
+    target: trackMenuButton,
+    preventDefault() { this.defaultPrevented = true; },
+    stopImmediatePropagation() { this.immediatePropagationStopped = true; },
+  };
+  frameDocument.dispatch("click", trackMenuEvent);
+  assert.equal(trackMenuEvent.defaultPrevented, undefined);
+  assert.equal(trackMenuEvent.immediatePropagationStopped, undefined);
+
+  for (const key of ["ArrowLeft", "ArrowRight", "Home", "End", "0", "5", "9", "NavigationLeft", "GamepadDPadRight"]) {
+    const keyEvent = {
+      key,
+      target: trackMenuButton,
+      preventDefault() { this.defaultPrevented = true; },
+      stopImmediatePropagation() { this.immediatePropagationStopped = true; },
+    };
+    frameDocument.dispatch("keydown", keyEvent);
+    assert.equal(keyEvent.defaultPrevented, true, `${key} should not seek`);
+  }
+});
+
+test("the blocked key list covers Jellyfin keyboard and TV-navigation seeks", () => {
+  for (const key of ["j", "l", "PageUp", "PageDown", "Home", "End", "0", "9", "NavigationLeft", "NavigationRight"]) {
+    assert.equal(isBlockedPlaybackKey(key), true, key);
+  }
+  for (const key of ["a", "s", "Enter", "Escape"]) {
+    assert.equal(isBlockedPlaybackKey(key), false, key);
+  }
 });
