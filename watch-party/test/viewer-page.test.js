@@ -37,6 +37,13 @@ class FakeFrameDocument {
       if (event.immediatePropagationStopped) break;
     }
   }
+  dispatchEvent(event) { this.dispatch(event.type, event); }
+}
+
+class FakePointerEvent {
+  constructor(type, options) {
+    Object.assign(this, options, { type, isTrusted: false });
+  }
 }
 
 class FakeSocket {
@@ -70,6 +77,7 @@ function setup({ bootstrapPromise } = {}) {
       frame.contentWindow = {
         location: { hash: "#/home" },
         document: new FakeFrameDocument(),
+        PointerEvent: FakePointerEvent,
       };
       frames.push(frame);
       return frame;
@@ -362,6 +370,30 @@ test("the passive player leaves Jellyfin visibility alone and hides the back but
   assert.doesNotMatch(style, /pointer-events/);
   assert.doesNotMatch(style, /\.osdPositionSlider/);
   assert.doesNotMatch(style, /\.btnPause/);
+});
+
+test("mouse hover wakes Jellyfin controls without pinning them open", async () => {
+  const { frames, intervals } = setup();
+  const socket = FakeSocket.instances[0];
+  socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const frameDocument = frames[0].contentWindow.document;
+  frameDocument.video = {
+    readyState: 4, duration: 1_400, currentTime: 20, paused: true, muted: false,
+  };
+  const movement = [];
+  intervals[0]();
+  frameDocument.addEventListener("pointermove", event => movement.push(event));
+
+  frameDocument.dispatch("pointermove", {
+    type: "pointermove", isTrusted: true, pointerType: "mouse", clientX: 0, clientY: 40,
+  });
+
+  const synthetic = movement.filter(event => !event.isTrusted);
+  assert.deepEqual(synthetic.map(event => event.clientX), [0, 16]);
+  assert.equal(frameDocument.getElementById("passive-viewer-restrictions").textContent.includes("videoOsdBottom"), false);
 });
 
 test("playback mutations are rejected without blocking Jellyfin UI events", async () => {
