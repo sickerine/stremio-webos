@@ -56,6 +56,7 @@ export function createPassiveViewer(options = {}) {
   let reconnectTimer = null;
   let stopped = false;
   const mediaGuards = new WeakMap();
+  const hardenedDocuments = new WeakSet();
   const viewerDeviceId = storage.getItem("stremio-watch-device-id") || createDeviceId();
   storage.setItem("stremio-watch-device-id", viewerDeviceId);
 
@@ -227,9 +228,27 @@ export function createPassiveViewer(options = {}) {
     ensurePlaying(video);
   }
 
-  function hardenPlayer(frameDocument, video) {
+  function wakeJellyfinControls(frameWindow, frameDocument, event) {
+    if (event.pointerType && event.pointerType !== "mouse") return;
+    const eventName = frameWindow.PointerEvent ? "pointermove" : "mousemove";
+    const EventConstructor = frameWindow.PointerEvent || frameWindow.MouseEvent;
+    if (!EventConstructor || !frameDocument.dispatchEvent) return;
+    const x = Number(event.clientX) || 0;
+    const y = Number(event.clientY) || 0;
+
+    for (const clientX of [x, x + 16]) {
+      frameDocument.dispatchEvent(new EventConstructor(eventName, {
+        bubbles: true,
+        clientX,
+        clientY: y,
+        pointerType: "mouse",
+      }));
+    }
+  }
+
+  function hardenPlayer(frameWindow, frameDocument, video) {
     if (!frameDocument) return;
-    if (!frameDocument.getElementById?.("passive-viewer-restrictions")) {
+    if (!hardenedDocuments.has(frameDocument)) {
       const style = frameDocument.createElement?.("style");
       if (style) {
         style.id = "passive-viewer-restrictions";
@@ -239,6 +258,13 @@ export function createPassiveViewer(options = {}) {
       frameDocument.addEventListener?.("click", event => {
         if (event.target?.tagName === "VIDEO") event.stopImmediatePropagation?.();
       }, true);
+      const movementEvent = frameWindow.PointerEvent ? "pointermove" : "mousemove";
+      const wakeControls = event => {
+        if (event.isTrusted) wakeJellyfinControls(frameWindow, frameDocument, event);
+      };
+      frameDocument.addEventListener?.(movementEvent, wakeControls, { passive: true });
+      frameDocument.addEventListener?.("mouseover", wakeControls, { passive: true });
+      hardenedDocuments.add(frameDocument);
     }
     protectVideo(video);
   }
@@ -250,7 +276,7 @@ export function createPassiveViewer(options = {}) {
         const frameWindow = nextFrame.contentWindow;
         const frameDocument = frameWindow?.document;
         const video = frameDocument?.querySelector("video");
-        hardenPlayer(frameDocument, video);
+        hardenPlayer(frameWindow, frameDocument, video);
         if (!activeSessionId) return;
         if (!video) {
           setStatus("Connecting to the TV", "Preparing the current stream.");
