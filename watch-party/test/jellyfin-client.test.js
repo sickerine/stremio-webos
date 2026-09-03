@@ -44,6 +44,36 @@ test("initialization completes a fresh server, authenticates, and enables Englis
   assert.equal(userConfiguration.SubtitleMode, "Always");
   assert.equal(userConfiguration.SubtitleLanguagePreference, "eng");
   assert.equal(userConfiguration.RememberSubtitleSelections, true);
+  const libraryConfiguration = JSON.parse(calls[9].options.body);
+  assert.equal(libraryConfiguration.LibraryOptions.EnableRealtimeMonitor, false);
+});
+
+test("initialization disables real-time monitoring on an existing stream library", async () => {
+  const calls = [];
+  const responses = [
+    jsonResponse({ StartupWizardCompleted: true }),
+    jsonResponse({ AccessToken: "token", User: { Id: "user-id", Configuration: {} } }),
+    jsonResponse(null, 204),
+    jsonResponse([{
+      Name: "Watch Party",
+      ItemId: "library-id",
+      LibraryOptions: { EnableRealtimeMonitor: true, PathInfos: [{ Path: "/media" }] },
+    }]),
+    jsonResponse(null, 204),
+  ];
+  const client = createJellyfinClient({
+    baseUrl: "http://jellyfin.test",
+    fetchImplementation: async (url, options) => { calls.push({ url, options }); return responses.shift(); },
+  });
+
+  await client.initialize();
+
+  const update = calls.find(call => call.url.endsWith("/Library/VirtualFolders/LibraryOptions"));
+  assert.ok(update);
+  assert.deepEqual(JSON.parse(update.options.body), {
+    Id: "library-id",
+    LibraryOptions: { EnableRealtimeMonitor: false, PathInfos: [{ Path: "/media" }] },
+  });
 });
 
 test("browser sessions receive direct play, pause, resume, and seek commands", async () => {
