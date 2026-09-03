@@ -373,7 +373,7 @@ test("the passive player limits forced visibility to cold-paused hover", async (
   assert.doesNotMatch(style, /\.btnPause/);
 });
 
-test("the outer page exposes controls for a cold-paused video then hides them after idle", async () => {
+test("the outer page handles hover until the TV has played the session", async () => {
   const { elements, frames, intervals, timeouts } = setup();
   const socket = FakeSocket.instances[0];
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
@@ -384,7 +384,6 @@ test("the outer page exposes controls for a cold-paused video then hides them af
   const frameDocument = frame.contentWindow.document;
   const video = {
     readyState: 4, duration: 1_400, currentTime: 20, paused: true, muted: false,
-    played: { length: 0 },
   };
   frameDocument.video = video;
   intervals[0]();
@@ -396,10 +395,14 @@ test("the outer page exposes controls for a cold-paused video then hides them af
   timeouts.at(-1)();
   assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), false);
 
-  video.played.length = 1;
+  socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: false });
   intervals[0]();
   assert.equal(elements["cold-paused-hover-catcher"].hidden, true);
   assert.equal(frameDocument.documentElement.classList.contains("cold-paused-hover"), false);
+
+  socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
+  intervals[0]();
+  assert.equal(elements["cold-paused-hover-catcher"].hidden, true);
 });
 
 test("playback mutations are rejected without blocking Jellyfin UI events", async () => {
