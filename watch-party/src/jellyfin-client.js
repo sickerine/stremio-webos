@@ -122,13 +122,28 @@ export function createJellyfinClient(options = {}) {
 
   async function ensureLibrary() {
     const libraries = await request("/Library/VirtualFolders");
-    if (libraries.some(library => library.Name === libraryName)) return;
+    const existingLibrary = libraries.find(library => library.Name === libraryName);
+    if (existingLibrary) {
+      if (existingLibrary.LibraryOptions?.EnableRealtimeMonitor === true) {
+        await request("/Library/VirtualFolders/LibraryOptions", {
+          method: "POST",
+          body: JSON.stringify({
+            Id: existingLibrary.ItemId,
+            LibraryOptions: {
+              ...existingLibrary.LibraryOptions,
+              EnableRealtimeMonitor: false,
+            },
+          }),
+        });
+      }
+      return;
+    }
     const query = new URLSearchParams({ name: libraryName, collectionType: "movies", paths: "/media", refreshLibrary: "true" });
     await request(`/Library/VirtualFolders?${query}`, {
       method: "POST",
       body: JSON.stringify({
         LibraryOptions: {
-          EnableRealtimeMonitor: true,
+          EnableRealtimeMonitor: false,
           EnableInternetProviders: false,
           EnableChapterImageExtraction: false,
           ExtractChapterImagesDuringLibraryScan: false,
