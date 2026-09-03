@@ -84,7 +84,6 @@ export function createBridgeServer({ coordinator, jellyfin, now = Date.now } = {
       activeCoordinator = createCoordinator({
         jellyfin,
         mediaLibrary: createMediaLibrary({ jellyfin }),
-        groupName: process.env.WATCH_PARTY_ROOM || "home",
       });
       ready = true;
     },

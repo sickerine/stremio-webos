@@ -123,46 +123,56 @@ export function createJellyfinClient(options = {}) {
     return result.Items.find(item => item.Path === itemPath) || null;
   }
 
-  async function ensureGroup(groupName) {
-    const groups = await request("/SyncPlay/List");
-    const existing = groups.find(group => group.GroupName === groupName);
-    if (existing) {
-      await request("/SyncPlay/Join", { method: "POST", body: JSON.stringify({ GroupId: existing.GroupId }) });
-    } else {
-      await request("/SyncPlay/New", { method: "POST", body: JSON.stringify({ GroupName: groupName }) });
-    }
-    await request("/SyncPlay/SetIgnoreWait", { method: "POST", body: JSON.stringify({ IgnoreWait: true }) });
+  async function controllableBrowserSessions() {
+    const sessions = await request("/Sessions");
+    return sessions.filter(session => session.Client === "Jellyfin Web" && session.SupportsRemoteControl);
   }
 
-  async function setQueue(itemId, positionSeconds) {
-    await request("/SyncPlay/SetNewQueue", {
-      method: "POST",
-      body: JSON.stringify({
-        PlayingQueue: [itemId],
-        PlayingItemPosition: 0,
-        StartPositionTicks: Math.round(positionSeconds * 10_000_000),
-      }),
+  async function playSession(sessionId, itemId, positionSeconds) {
+    const query = new URLSearchParams({
+      playCommand: "PlayNow",
+      itemIds: itemId,
+      startPositionTicks: String(Math.round(positionSeconds * 10_000_000)),
     });
+    await request(`/Sessions/${encodeURIComponent(sessionId)}/Playing?${query}`, { method: "POST" });
   }
 
-  async function pause() { await request("/SyncPlay/Pause", { method: "POST" }); }
-  async function unpause() { await request("/SyncPlay/Unpause", { method: "POST" }); }
-  async function seek(positionSeconds) {
-    await request("/SyncPlay/Seek", {
-      method: "POST",
-      body: JSON.stringify({ PositionTicks: Math.round(positionSeconds * 10_000_000) }),
-    });
+  async function commandSession(sessionId, command, positionSeconds) {
+    const query = new URLSearchParams();
+    if (command === "Seek") query.set("seekPositionTicks", String(Math.round(positionSeconds * 10_000_000)));
+    const suffix = query.size ? `?${query}` : "";
+    await request(`/Sessions/${encodeURIComponent(sessionId)}/Playing/${command}${suffix}`, { method: "POST" });
+  }
+
+  async function syncViewers(itemId, state, { actions = [], checkDrift = false } = {}) {
+    const sessions = await controllableBrowserSessions();
+    await Promise.all(sessions.map(async session => {
+      if (session.NowPlayingItem?.Id !== itemId) {
+        await playSession(session.Id, itemId, state.positionSeconds);
+        if (state.paused) await commandSession(session.Id, "Pause", state.positionSeconds);
+        return;
+      }
+
+      const browserPosition = Number(session.PlayState?.PositionTicks || 0) / 10_000_000;
+      const shouldSeek = actions.includes("seek")
+        || (checkDrift && session.PlayState?.CanSeek && Math.abs(browserPosition - state.positionSeconds) >= 4);
+      if (shouldSeek) await commandSession(session.Id, "Seek", state.positionSeconds);
+
+      if (actions.includes("pause")) await commandSession(session.Id, "Pause", state.positionSeconds);
+      if (actions.includes("unpause")) await commandSession(session.Id, "Unpause", state.positionSeconds);
+      if (checkDrift && !actions.includes("pause") && !actions.includes("unpause")
+          && Boolean(session.PlayState?.IsPaused) !== state.paused) {
+        await commandSession(session.Id, state.paused ? "Pause" : "Unpause", state.positionSeconds);
+      }
+    }));
+    return sessions.length;
   }
 
   return {
     initialize,
     refreshLibrary,
     findItemByPath,
-    ensureGroup,
-    setQueue,
-    pause,
-    unpause,
-    seek,
+    syncViewers,
     status() { return { authenticated: Boolean(accessToken), userId: user?.Id || null }; },
   };
 }
