@@ -338,7 +338,7 @@ test("the passive controller leaves subtitle and audio selection to Jellyfin", a
   assert.equal(tracks.some(element => element.tagName === "TRACK"), false);
 });
 
-test("an active stream keeps Jellyfin controls visible and hides the back button", async () => {
+test("the passive player leaves Jellyfin visibility alone and hides the back button", async () => {
   const { frames, intervals } = setup();
   const socket = FakeSocket.instances[0];
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
@@ -355,10 +355,10 @@ test("an active stream keeps Jellyfin controls visible and hides the back button
   const style = frameDocument.getElementById("passive-viewer-restrictions").textContent;
   assert.match(style, /\.headerBackButton/);
   assert.match(style, /display:\s*none/);
-  assert.match(style, /\.skinHeader/);
-  assert.match(style, /\.videoOsdBottom/);
-  assert.match(style, /opacity:\s*1/);
-  assert.match(style, /visibility:\s*visible/);
+  assert.doesNotMatch(style, /\.skinHeader/);
+  assert.doesNotMatch(style, /\.videoOsdBottom/);
+  assert.doesNotMatch(style, /opacity/);
+  assert.doesNotMatch(style, /visibility/);
   assert.doesNotMatch(style, /pointer-events/);
   assert.doesNotMatch(style, /\.osdPositionSlider/);
   assert.doesNotMatch(style, /\.btnPause/);
