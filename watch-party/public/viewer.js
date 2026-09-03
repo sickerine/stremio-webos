@@ -1,4 +1,5 @@
 const PLAYER_RESTRICTIONS = `
+  .skinHeader,
   .headerBackButton,
   .headerHomeButton,
   .btnPreviousTrack,
@@ -212,7 +213,7 @@ export function createPassiveViewer(options = {}) {
       nextFrame.title = "TV playback";
       nextFrame.allow = "autoplay; fullscreen; picture-in-picture";
       nextFrame.allowFullscreen = true;
-      nextFrame.src = "/web/#/home";
+      nextFrame.src = "/web/#/video";
       frame = nextFrame;
       bootingSessionId = null;
       player.replaceChildren(nextFrame);

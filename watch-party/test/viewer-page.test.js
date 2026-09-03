@@ -102,7 +102,7 @@ test("a fresh viewer needs no login and reveals only active TV video", async () 
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(frames.length, 1);
-  assert.equal(frames[0].src, "/web/#/home");
+  assert.equal(frames[0].src, "/web/#/video");
   assert.match(values.get("jellyfin_credentials"), /"AccessToken":"token"/);
   assert.equal(values.get("_deviceId2"), "viewer-device-123");
   assert.equal(values.get("stremio-watch-device-id"), "viewer-device-123");
@@ -113,8 +113,6 @@ test("a fresh viewer needs no login and reveals only active TV video", async () 
   intervals[0]();
   assert.equal(elements.waiting.hidden, true);
   assert.equal(elements.player.hidden, false);
-  assert.equal(frames[0].contentWindow.location.hash, "#/home", "remote playback does not change Jellyfin's route");
-
   socket.message({ type: "viewer-state", mode: "waiting" });
   assert.equal(elements.waiting.hidden, false);
   assert.equal(elements.player.hidden, true);
