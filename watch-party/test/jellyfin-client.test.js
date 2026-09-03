@@ -10,6 +10,17 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+function mediaWithEnglishSubtitle(index = 2) {
+  return {
+    MediaStreams: [
+      { Index: 0, Type: "Video" },
+      { Index: 1, Type: "Audio", Language: "jpn" },
+      ...(index === 2 ? [] : [{ Index: 2, Type: "Subtitle", Language: "spa", IsDefault: true }]),
+      { Index: index, Type: "Subtitle", Language: "eng", IsDefault: index === 2 },
+    ],
+  };
+}
+
 test("initialization completes a fresh server, authenticates, and enables English subtitles", async () => {
   const calls = [];
   const responses = [
@@ -47,6 +58,7 @@ test("browser sessions receive direct play, pause, resume, and seek commands", a
       },
       { Id: "bridge", Client: "Stremio TV Bridge", SupportsRemoteControl: false },
     ]),
+    jsonResponse(mediaWithEnglishSubtitle(4)),
     jsonResponse(null, 204),
     jsonResponse([
       {
@@ -81,6 +93,7 @@ test("browser sessions receive direct play, pause, resume, and seek commands", a
   const playCall = calls.find(call => call.url.includes("/Sessions/browser-1/Playing?"));
   assert.match(playCall.url, /playCommand=PlayNow/);
   assert.match(playCall.url, /startPositionTicks=123450000/);
+  assert.match(playCall.url, /subtitleStreamIndex=4/);
   assert.ok(calls.some(call => call.url.endsWith("/Sessions/browser-1/Playing/Pause")));
   assert.ok(calls.some(call => call.url.endsWith("/Sessions/browser-1/Playing/Unpause")));
   assert.ok(calls.some(call => call.url.endsWith("/Sessions/browser-1/Playing/Seek?seekPositionTicks=802500000")));
@@ -101,11 +114,11 @@ test("a browser item is not restarted on ordinary heartbeats while loading", asy
     jsonResponse({ StartupWizardCompleted: true }),
     jsonResponse({ AccessToken: "token", User: { Id: "user-id", Configuration: {} } }),
     jsonResponse(null, 204), jsonResponse([{ Name: "Watch Party" }]),
-    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(mediaWithEnglishSubtitle()), jsonResponse(null, 204),
     jsonResponse([browserWithoutPlayback]),
     jsonResponse([browserPlayingItemA]),
     jsonResponse([browserWithoutPlayback]),
-    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(mediaWithEnglishSubtitle(3)), jsonResponse(null, 204),
   ];
   const client = createJellyfinClient({
     baseUrl: "http://jellyfin.test",
@@ -136,7 +149,7 @@ test("a reused browser session retries a lost play assignment after a bounded de
     jsonResponse({ StartupWizardCompleted: true }),
     jsonResponse({ AccessToken: "token", User: { Id: "user-id", Configuration: {} } }),
     jsonResponse(null, 204), jsonResponse([{ Name: "Watch Party" }]),
-    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(mediaWithEnglishSubtitle()), jsonResponse(null, 204),
     jsonResponse([browserWithoutPlayback]),
     jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
   ];
