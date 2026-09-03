@@ -128,11 +128,15 @@ export function createPassiveViewer(options = {}) {
   function attachSubtitleTrack(video) {
     if (!activeItemId || !activeMediaSourceId || !Number.isInteger(activeSubtitleIndex) || !viewerAccessToken) return;
     const key = `${activeItemId}:${activeMediaSourceId}:${activeSubtitleIndex}`;
-    if (subtitleTargetKey === key) return;
     const frameDocument = video.ownerDocument || frame?.contentWindow?.document;
+    const existingTrack = frameDocument?.querySelector?.("track[data-passive-viewer-subtitle]");
+    if (subtitleTargetKey === key && existingTrack) {
+      if (existingTrack.track?.mode !== "showing") existingTrack.track.mode = "showing";
+      return;
+    }
     const track = frameDocument?.createElement?.("track");
     if (!track) return;
-    frameDocument.querySelector?.("track[data-passive-viewer-subtitle]")?.remove();
+    existingTrack?.remove();
     track.dataset.passiveViewerSubtitle = "true";
     track.kind = "subtitles";
     track.label = "English";
