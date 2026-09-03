@@ -69,6 +69,7 @@ function setup({ bootstrapPromise } = {}) {
     clearIntervalImplementation: () => {},
     setTimeoutImplementation: callback => { timeouts.push(callback); return timeouts.length; },
     clearTimeoutImplementation: () => {},
+    createDeviceId: () => "viewer-device-123",
   });
   return { controller, elements, frames, values, intervals, timeouts, bootstrap };
 }
@@ -86,7 +87,10 @@ test("a fresh viewer needs no login and reveals only active TV video", async () 
   assert.equal(frames.length, 1);
   assert.equal(frames[0].src, "/web/#/home");
   assert.match(values.get("jellyfin_credentials"), /"AccessToken":"token"/);
+  assert.equal(values.get("_deviceId2"), "viewer-device-123");
+  assert.equal(values.get("stremio-watch-device-id"), "viewer-device-123");
   assert.equal(elements.waiting.hidden, false);
+  assert.equal(elements.player.hidden, false, "the covered iframe stays active for Jellyfin remote control");
 
   frames[0].contentWindow.location.hash = "#/video";
   frames[0].contentWindow.document.querySelector = selector => selector === "video" ? { readyState: 4 } : null;
