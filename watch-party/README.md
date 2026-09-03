@@ -23,7 +23,8 @@ localStorage.setItem('watchPartyUrl', 'ws://YOUR_COMPUTER_IP:3211/ws');
 
 - Browsers direct-play supported TorBox streams instead of always transcoding video.
 - Unsupported formats use Jellyfin's normal remux/transcode decision tree.
-- Embedded ASS subtitles and fonts render through Jellyfin's libass player.
+- Jellyfin extracts embedded text subtitles and font attachments during the stream scan, so its libass player has them before playback begins.
+- Viewers can choose subtitle and audio tracks, but playback controls cannot pause, skip, or seek away from the TV.
 - The public page exposes only the current TV playback. Direct top-level Jellyfin pages redirect to the waiting page.
 - A short disconnect grace period prevents TV WebSocket reconnects from flashing the viewer back to waiting.
 - Docker limits Jellyfin to two CPU cores and 3 GiB of memory, and limits the bridge to half a core and 256 MiB.
