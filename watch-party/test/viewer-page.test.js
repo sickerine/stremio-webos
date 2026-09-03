@@ -376,6 +376,7 @@ test("playback mutations are rejected without blocking Jellyfin UI events", asyn
   let fastSeekCalls = 0;
   const frameDocument = frames[0].contentWindow.document;
   const video = {
+    tagName: "VIDEO",
     readyState: 4, duration: 1_400, currentTime: 20, paused: true, muted: false,
     play() { playCalls += 1; this.paused = false; return Promise.resolve(); },
     pause() { pauseCalls += 1; this.paused = true; },
@@ -392,6 +393,13 @@ test("playback mutations are rejected without blocking Jellyfin UI events", asyn
   assert.equal(pauseCalls, 0);
   assert.equal(fastSeekCalls, 0);
   assert.equal(video.currentTime, 20);
+
+  const videoClick = {
+    target: video,
+    stopImmediatePropagation() { this.immediatePropagationStopped = true; },
+  };
+  frameDocument.dispatch("click", videoClick);
+  assert.equal(videoClick.immediatePropagationStopped, true, "the video surface cannot toggle playback");
 
   for (const [eventName, key] of [["pointerdown"], ["click"], ["change"], ["keydown", "ArrowRight"]]) {
     const event = {
