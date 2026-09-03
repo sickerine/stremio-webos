@@ -1,41 +1,15 @@
-const PLAYER_RESTRICTIONS = `
-  .skinHeader,
-  .headerBackButton,
-  .headerHomeButton,
-  .btnPreviousTrack,
-  .btnNextTrack,
-  .btnPreviousChapter,
-  .btnNextChapter,
-  .btnRewind,
-  .btnPause,
-  .btnFastForward,
-  .btnUserRating,
-  .osdPositionSlider {
-    pointer-events: none !important;
-    touch-action: none !important;
+const PASSIVE_PLAYER_STYLE = `
+  .headerBackButton {
+    display: none !important;
   }
 `;
 
-const BLOCKED_PLAYBACK_KEYS = new Set([
-  " ", "k", "j", "l", "arrowleft", "arrowright", "pagedown", "pageup",
-  "home", "end", "navigationleft", "navigationright", "gamepaddpadleft",
-  "gamepaddpadright", "gamepadleftthumbstickleft", "gamepadleftthumbstickright",
-  "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-]);
-
-const SEEK_CONTROL_EVENTS = ["pointerdown", "mousedown", "touchstart", "click", "input", "change"];
-
-export function isBlockedPlaybackKey(key) {
-  return BLOCKED_PLAYBACK_KEYS.has(String(key || "").toLowerCase());
-}
-
-function isPositionSlider(target) {
-  return Boolean(target?.matches?.(".osdPositionSlider") || target?.closest?.(".osdPositionSlider"));
-}
-
-function blockEvent(event) {
-  event.preventDefault?.();
-  event.stopImmediatePropagation?.();
+function findPropertyDescriptor(target, name) {
+  for (let current = target; current; current = Object.getPrototypeOf(current)) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name);
+    if (descriptor) return descriptor;
+  }
+  return null;
 }
 
 export function createBrowserDeviceId(cryptoImplementation) {
@@ -81,6 +55,7 @@ export function createPassiveViewer(options = {}) {
   let socket = null;
   let reconnectTimer = null;
   let stopped = false;
+  const mediaGuards = new WeakMap();
   const viewerDeviceId = storage.getItem("stremio-watch-device-id") || createDeviceId();
   storage.setItem("stremio-watch-device-id", viewerDeviceId);
 
@@ -139,13 +114,84 @@ export function createPassiveViewer(options = {}) {
     catch (error) { return null; }
   }
 
+  function protectVideo(video) {
+    if (!video || mediaGuards.has(video)) return;
+
+    const currentTimeDescriptor = findPropertyDescriptor(video, "currentTime");
+    let currentTimeValue = currentTimeDescriptor?.value;
+    const guard = {
+      authorityDepth: 0,
+      nativePlay: typeof video.play === "function" ? video.play.bind(video) : null,
+      nativePause: typeof video.pause === "function" ? video.pause.bind(video) : null,
+      nativeFastSeek: typeof video.fastSeek === "function" ? video.fastSeek.bind(video) : null,
+      readCurrentTime() {
+        if (currentTimeDescriptor?.get) return currentTimeDescriptor.get.call(video);
+        return currentTimeValue;
+      },
+      writeCurrentTime(value) {
+        if (currentTimeDescriptor?.set) currentTimeDescriptor.set.call(video, value);
+        else currentTimeValue = value;
+      },
+    };
+    mediaGuards.set(video, guard);
+
+    if (guard.nativePlay) {
+      Object.defineProperty(video, "play", {
+        configurable: true,
+        value: () => guard.authorityDepth > 0 ? guard.nativePlay() : Promise.resolve(),
+      });
+    }
+    if (guard.nativePause) {
+      Object.defineProperty(video, "pause", {
+        configurable: true,
+        value: () => guard.authorityDepth > 0 ? guard.nativePause() : undefined,
+      });
+    }
+    if (guard.nativeFastSeek) {
+      Object.defineProperty(video, "fastSeek", {
+        configurable: true,
+        value: value => guard.authorityDepth > 0 ? guard.nativeFastSeek(value) : undefined,
+      });
+    }
+    if (currentTimeDescriptor) {
+      Object.defineProperty(video, "currentTime", {
+        configurable: true,
+        get: () => guard.readCurrentTime(),
+        set: value => {
+          if (guard.authorityDepth > 0) guard.writeCurrentTime(value);
+        },
+      });
+    }
+  }
+
+  function withMediaAuthority(video, callback) {
+    protectVideo(video);
+    const guard = mediaGuards.get(video);
+    if (!guard) return callback();
+    guard.authorityDepth += 1;
+    try { return callback(); }
+    finally { guard.authorityDepth -= 1; }
+  }
+
+  function playFromTv(video) {
+    return withMediaAuthority(video, () => video.play?.());
+  }
+
+  function pauseFromTv(video) {
+    return withMediaAuthority(video, () => video.pause?.());
+  }
+
+  function seekFromTv(video, positionSeconds) {
+    return withMediaAuthority(video, () => { video.currentTime = positionSeconds; });
+  }
+
   function enableSound() {
     const video = currentVideo();
     if (!video || !video.muted) return;
     video.muted = false;
     soundPrompt.hidden = true;
     if (!tvPaused) {
-      Promise.resolve().then(() => video.play()).catch(() => {
+      Promise.resolve().then(() => playFromTv(video)).catch(() => {
         video.muted = true;
         soundPrompt.hidden = false;
       });
@@ -155,11 +201,11 @@ export function createPassiveViewer(options = {}) {
   function ensurePlaying(video) {
     if (tvPaused || !video.paused || autoplayAttempt) return;
     autoplayAttempt = Promise.resolve()
-      .then(() => video.play())
+      .then(() => playFromTv(video))
       .catch(() => {
         video.muted = true;
         soundPrompt.hidden = false;
-        return video.play();
+        return playFromTv(video);
       })
       .catch(() => {})
       .finally(() => { autoplayAttempt = null; });
@@ -171,44 +217,27 @@ export function createPassiveViewer(options = {}) {
       const target = tvPositionSeconds + elapsedSeconds;
       if (Number.isFinite(video.duration)) {
         const boundedTarget = Math.min(target, Math.max(0, video.duration - 0.25));
-        if (Math.abs(video.currentTime - boundedTarget) >= 1.5) video.currentTime = boundedTarget;
+        if (Math.abs(video.currentTime - boundedTarget) >= 1.5) seekFromTv(video, boundedTarget);
       }
     }
     if (tvPaused) {
-      if (!video.paused) video.pause();
+      if (!video.paused) pauseFromTv(video);
       return;
     }
     ensurePlaying(video);
   }
 
-  function hardenPlayer(frameDocument) {
+  function hardenPlayer(frameDocument, video) {
     if (!frameDocument) return;
     if (!frameDocument.getElementById?.("passive-viewer-restrictions")) {
       const style = frameDocument.createElement?.("style");
       if (style) {
         style.id = "passive-viewer-restrictions";
-        style.textContent = PLAYER_RESTRICTIONS;
+        style.textContent = PASSIVE_PLAYER_STYLE;
         frameDocument.head?.appendChild(style);
       }
-      frameDocument.addEventListener?.("keydown", event => {
-        enableSound();
-        if (isPositionSlider(event.target) || isBlockedPlaybackKey(event.key)) blockEvent(event);
-      }, true);
-      for (const eventName of SEEK_CONTROL_EVENTS) {
-        frameDocument.addEventListener?.(eventName, event => {
-          if (!isPositionSlider(event.target)) return;
-          enableSound();
-          blockEvent(event);
-        }, true);
-      }
-      frameDocument.addEventListener?.("pointerdown", enableSound, true);
     }
-
-    for (const slider of frameDocument.querySelectorAll?.(".osdPositionSlider") || []) {
-      slider.tabIndex = -1;
-      slider.setAttribute?.("aria-disabled", "true");
-      slider.classList?.remove?.("focusable");
-    }
+    protectVideo(video);
   }
 
   function watchFrame(nextFrame) {
@@ -218,9 +247,9 @@ export function createPassiveViewer(options = {}) {
         const frameWindow = nextFrame.contentWindow;
         const frameDocument = frameWindow?.document;
         const video = frameDocument?.querySelector("video");
-        hardenPlayer(frameDocument);
+        hardenPlayer(frameDocument, video);
         if (!activeSessionId) return;
-        if (!video || video.readyState < 2) {
+        if (!video) {
           setStatus("Connecting to the TV", "Preparing the current stream.");
           return;
         }
@@ -314,8 +343,6 @@ export function createPassiveViewer(options = {}) {
 
 
   soundPrompt.addEventListener("click", enableSound);
-  document.addEventListener?.("pointerdown", enableSound, true);
-  document.addEventListener?.("keydown", enableSound, true);
 
   showWaiting();
   prepareFrame().catch(() => {});
