@@ -1,0 +1,39 @@
+import { createHash } from "node:crypto";
+import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+function mediaKey(mediaUrl) {
+  return createHash("sha256").update(mediaUrl).digest("hex").slice(0, 24);
+}
+
+export function createMediaLibrary({ jellyfin, mediaRoot = "/media", pollIntervalMs = 500, maxPolls = 120 }) {
+  async function removeOtherStreams(filename) {
+    const entries = await readdir(mediaRoot, { withFileTypes: true });
+    await Promise.all(entries
+      .filter(entry => entry.isFile() && entry.name.endsWith(".strm") && entry.name !== filename)
+      .map(entry => rm(path.join(mediaRoot, entry.name), { force: true })));
+  }
+
+  async function importStream(state) {
+    const key = mediaKey(state.mediaUrl);
+    const filename = `${key}.strm`;
+    const finalPath = path.join(mediaRoot, filename);
+    const temporaryPath = `${finalPath}.tmp`;
+
+    await mkdir(mediaRoot, { recursive: true });
+    await writeFile(temporaryPath, `${state.mediaUrl}\n`, "utf8");
+    await rename(temporaryPath, finalPath);
+    await removeOtherStreams(filename);
+    await jellyfin.refreshLibrary();
+
+    for (let attempt = 0; attempt < maxPolls; attempt += 1) {
+      const item = await jellyfin.findItemByPath(finalPath);
+      if (item) return item;
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    throw new Error(`Jellyfin did not index ${filename}`);
+  }
+
+  return { importStream };
+}

@@ -16,7 +16,6 @@
     var room = setting('watchPartyRoom', 'home');
     var socket = null;
     var video = null;
-    var buffering = false;
     var mediaUrl = null;
     var sessionId = null;
     var sourceRevision = 0;
@@ -63,7 +62,6 @@
             positionSeconds: positionSeconds(),
             paused: Boolean(!video || video.paused || video.ended),
             playbackRate: video && isFinite(video.playbackRate) && video.playbackRate > 0 ? video.playbackRate : 1,
-            buffering: buffering,
             durationSeconds: video && isFinite(video.duration) ? video.duration : null,
             mediaUrl: mediaUrl,
             episodeId: episodeId(),
@@ -76,12 +74,8 @@
         try { socket.send(JSON.stringify({ type: 'state', state: state() })); } catch (error) {}
     }
 
-    function playerEvent(name) {
-        return function () {
-            if (name === 'waiting' || name === 'stalled' || name === 'seeking') buffering = true;
-            if (name === 'playing' || name === 'canplay' || name === 'seeked') buffering = false;
-            publish();
-        };
+    function playerEvent() {
+        return function () { publish(); };
     }
 
     function detach() {
@@ -98,9 +92,9 @@
         detach();
         video = nextVideo;
         if (!video) return;
-        ['play', 'pause', 'playing', 'waiting', 'stalled', 'seeking', 'seeked', 'ratechange', 'ended', 'canplay']
+        ['play', 'pause', 'seeked', 'ratechange', 'ended']
             .forEach(function (name) {
-                listeners[name] = playerEvent(name);
+                listeners[name] = playerEvent();
                 video.addEventListener(name, listeners[name]);
             });
     }

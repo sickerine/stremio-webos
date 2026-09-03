@@ -1,31 +1,27 @@
 # Stremio Watch Party
 
-The LG TV owns playback state. This service turns the TV's selected HTTP stream into browser-compatible HLS and keeps browser viewers aligned with the TV.
+Jellyfin provides the browser player, ASS/SSA subtitle rendering, media probing, and SyncPlay. The bridge imports the TV's selected HTTP stream as a `.strm` item and turns meaningful TV play, pause, and seek changes into SyncPlay commands.
 
-## Run it
+## Run
 
 ```sh
 docker compose up --build -d
 ```
 
-Open `http://localhost:3210/?room=home`.
+Open `http://localhost:3210/web/` and sign in with `watchparty` / `watchparty`. Use Jellyfin's SyncPlay button to join the `home` group. The account automatically prefers English subtitles and always enables an available subtitle track.
 
-The TV bridge is inactive until these values exist in the Stremio app's local storage:
+The Stremio TV bridge connects to:
 
 ```js
 localStorage.setItem('watchPartyEnabled', '1');
 localStorage.setItem('watchPartyRoom', 'home');
-localStorage.setItem('watchPartyUrl', 'ws://YOUR_COMPUTER_IP:3210/ws');
+localStorage.setItem('watchPartyUrl', 'ws://YOUR_COMPUTER_IP:3211/ws');
 ```
 
-Reload the app after changing the values. The bridge uses the current video and clock exposed by `ass-controller.js`. It publishes source changes and playback state, but never accepts viewer control commands.
+## Why Jellyfin
 
-## Current scope
-
-- Direct HTTP and debrid media URLs
-- FFmpeg conversion to H.264/AAC HLS
-- TV-led play, pause, seek, rate, buffering, and episode changes
-- Viewer reconnect and drift correction
-- One room per URL query, with `home` as the default
-
-Torrent-only `infoHash` sources and remote Internet exposure are not part of this first local implementation.
+- Browsers direct-play supported TorBox streams instead of always transcoding video.
+- Unsupported formats use Jellyfin's normal remux/transcode decision tree.
+- Embedded ASS subtitles and fonts render through Jellyfin's libass player.
+- SyncPlay handles browser coordination; the bridge does not fight browser buffering events.
+- Docker limits Jellyfin to two CPU cores and 3 GiB of memory, and limits the bridge to half a core and 256 MiB.
