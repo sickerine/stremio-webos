@@ -10,6 +10,14 @@ const PLAYER_RESTRICTIONS = `
   .btnFastForward,
   .btnUserRating,
   .osdPositionSliderContainer { display: none !important; }
+
+  video::cue {
+    color: white;
+    background: rgb(0 0 0 / 78%);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 1.15em;
+    line-height: 1.25;
+  }
 `;
 
 export function createBrowserDeviceId(cryptoImplementation) {
@@ -50,6 +58,11 @@ export function createPassiveViewer(options = {}) {
   let tvPaused = true;
   let tvPositionSeconds = null;
   let tvPositionReceivedAtMs = 0;
+  let activeItemId = null;
+  let activeMediaSourceId = null;
+  let activeSubtitleIndex = null;
+  let viewerAccessToken = null;
+  let subtitleTargetKey = null;
   let autoplayAttempt = null;
   let generation = 0;
   let socket = null;
@@ -80,6 +93,10 @@ export function createPassiveViewer(options = {}) {
     activeSessionId = null;
     bootingSessionId = null;
     tvPositionSeconds = null;
+    activeItemId = null;
+    activeMediaSourceId = null;
+    activeSubtitleIndex = null;
+    subtitleTargetKey = null;
     clearFrame();
     setStatus(title, body);
   }
@@ -89,6 +106,7 @@ export function createPassiveViewer(options = {}) {
       throw new Error("Incomplete viewer session");
     }
     const address = location.origin;
+    viewerAccessToken = session.accessToken;
     storage.setItem("enableAutoLogin", "true");
     storage.setItem("_deviceId2", viewerDeviceId);
     storage.setItem(`user-${session.userId}-${session.serverId}`, JSON.stringify(session.user));
@@ -105,6 +123,26 @@ export function createPassiveViewer(options = {}) {
         UserId: session.userId,
       }],
     }));
+  }
+
+  function attachSubtitleTrack(video) {
+    if (!activeItemId || !activeMediaSourceId || !Number.isInteger(activeSubtitleIndex) || !viewerAccessToken) return;
+    const key = `${activeItemId}:${activeMediaSourceId}:${activeSubtitleIndex}`;
+    if (subtitleTargetKey === key) return;
+    const frameDocument = video.ownerDocument || frame?.contentWindow?.document;
+    const track = frameDocument?.createElement?.("track");
+    if (!track) return;
+    frameDocument.querySelector?.("track[data-passive-viewer-subtitle]")?.remove();
+    track.dataset.passiveViewerSubtitle = "true";
+    track.kind = "subtitles";
+    track.label = "English";
+    track.srclang = "en";
+    track.default = true;
+    track.src = `/Videos/${encodeURIComponent(activeItemId)}/${encodeURIComponent(activeMediaSourceId)}/Subtitles/${activeSubtitleIndex}/Stream.vtt?api_key=${encodeURIComponent(viewerAccessToken)}`;
+    track.addEventListener?.("load", () => { track.track.mode = "showing"; }, { once: true });
+    video.appendChild(track);
+    if (track.track) track.track.mode = "showing";
+    subtitleTargetKey = key;
   }
 
   function currentVideo() {
@@ -184,6 +222,7 @@ export function createPassiveViewer(options = {}) {
           setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
           return;
         }
+        attachSubtitleTrack(video);
         synchronizeVideo(video);
         waiting.hidden = true;
         player.hidden = false;
@@ -233,6 +272,9 @@ export function createPassiveViewer(options = {}) {
         tvPositionSeconds = message.positionSeconds;
         tvPositionReceivedAtMs = now();
       }
+      if (message.itemId) activeItemId = message.itemId;
+      if (message.mediaSourceId) activeMediaSourceId = message.mediaSourceId;
+      if (Number.isInteger(message.subtitleIndex)) activeSubtitleIndex = message.subtitleIndex;
       showPlaying(message);
       return;
     }

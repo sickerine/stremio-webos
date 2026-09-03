@@ -30,7 +30,7 @@ export function createJellyfinClient(options = {}) {
   let accessToken = "";
   let user = null;
   const browserAssignments = new Map();
-  const subtitleIndexByItem = new Map();
+  const subtitleTrackByItem = new Map();
 
   async function request(pathname, requestOptions = {}) {
     const headers = new Headers(requestOptions.headers);
@@ -159,19 +159,21 @@ export function createJellyfinClient(options = {}) {
     return sessions.filter(session => session.Client === "Jellyfin Web" && session.SupportsRemoteControl);
   }
 
-  async function preferredSubtitleIndex(itemId) {
-    if (!subtitleIndexByItem.has(itemId)) {
-      subtitleIndexByItem.set(itemId, request(
+  async function subtitleTrackForItem(itemId) {
+    if (!subtitleTrackByItem.has(itemId)) {
+      subtitleTrackByItem.set(itemId, request(
         `/Users/${encodeURIComponent(user.Id)}/Items/${encodeURIComponent(itemId)}?Fields=MediaStreams,MediaSources`,
       ).then(item => {
-        const streams = item.MediaStreams || item.MediaSources?.[0]?.MediaStreams || [];
+        const mediaSource = item.MediaSources?.[0];
+        const streams = item.MediaStreams || mediaSource?.MediaStreams || [];
         const subtitles = streams.filter(stream => stream.Type === "Subtitle" && Number.isInteger(stream.Index));
         const english = subtitles.find(stream => /^(eng|en)$/i.test(stream.Language || ""));
         const preferred = english || subtitles.find(stream => stream.IsDefault) || subtitles[0];
-        return preferred?.Index ?? null;
+        if (!preferred) return null;
+        return { index: preferred.Index, mediaSourceId: mediaSource?.Id || itemId };
       }).catch(() => null));
     }
-    return subtitleIndexByItem.get(itemId);
+    return subtitleTrackByItem.get(itemId);
   }
 
   async function playSession(sessionId, itemId, positionSeconds) {
@@ -180,8 +182,8 @@ export function createJellyfinClient(options = {}) {
       itemIds: itemId,
       startPositionTicks: String(Math.round(positionSeconds * 10_000_000)),
     });
-    const subtitleIndex = await preferredSubtitleIndex(itemId);
-    if (Number.isInteger(subtitleIndex)) query.set("subtitleStreamIndex", String(subtitleIndex));
+    const subtitleTrack = await subtitleTrackForItem(itemId);
+    if (Number.isInteger(subtitleTrack?.index)) query.set("subtitleStreamIndex", String(subtitleTrack.index));
     await request(`/Sessions/${encodeURIComponent(sessionId)}/Playing?${query}`, { method: "POST" });
   }
 
@@ -228,6 +230,7 @@ export function createJellyfinClient(options = {}) {
     findItemByPath,
     syncViewers,
     createViewerSession,
+    subtitleTrackForItem,
     status() { return { authenticated: Boolean(accessToken), userId: user?.Id || null }; },
   };
 }

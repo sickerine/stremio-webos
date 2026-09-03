@@ -12,6 +12,7 @@ function jsonResponse(body, status = 200) {
 
 function mediaWithEnglishSubtitle(index = 2) {
   return {
+    MediaSources: [{ Id: "media-source-id" }],
     MediaStreams: [
       { Index: 0, Type: "Video" },
       { Index: 1, Type: "Audio", Language: "jpn" },
@@ -94,6 +95,9 @@ test("browser sessions receive direct play, pause, resume, and seek commands", a
   assert.match(playCall.url, /playCommand=PlayNow/);
   assert.match(playCall.url, /startPositionTicks=123450000/);
   assert.match(playCall.url, /subtitleStreamIndex=4/);
+  assert.deepEqual(await client.subtitleTrackForItem("item-id"), {
+    index: 4, mediaSourceId: "media-source-id",
+  });
   assert.ok(calls.some(call => call.url.endsWith("/Sessions/browser-1/Playing/Pause")));
   assert.ok(calls.some(call => call.url.endsWith("/Sessions/browser-1/Playing/Unpause")));
   assert.ok(calls.some(call => call.url.endsWith("/Sessions/browser-1/Playing/Seek?seekPositionTicks=802500000")));
