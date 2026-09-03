@@ -86,3 +86,42 @@ test("browser sessions receive direct play, pause, resume, and seek commands", a
   assert.ok(calls.some(call => call.url.endsWith("/Sessions/browser-1/Playing/Seek?seekPositionTicks=802500000")));
   assert.equal(calls.some(call => call.url.includes("SyncPlay") || call.url.includes("Buffering")), false);
 });
+
+test("a pending browser start is not resent while Jellyfin is still loading it", async () => {
+  const calls = [];
+  let nowMs = 10_000;
+  const browserWithoutPlayback = {
+    Id: "browser-1", Client: "Jellyfin Web", SupportsRemoteControl: true,
+    NowPlayingItem: null, PlayState: { IsPaused: false, CanSeek: true },
+  };
+  const responses = [
+    jsonResponse({ StartupWizardCompleted: true }),
+    jsonResponse({ AccessToken: "token", User: { Id: "user-id", Configuration: {} } }),
+    jsonResponse(null, 204), jsonResponse([{ Name: "Watch Party" }]),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+    jsonResponse([browserWithoutPlayback]),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+  ];
+  const client = createJellyfinClient({
+    baseUrl: "http://jellyfin.test",
+    now: () => nowMs,
+    playCommandRetryMs: 30_000,
+    fetchImplementation: async (url, options) => { calls.push({ url, options }); return responses.shift(); },
+  });
+  await client.initialize();
+
+  await client.syncViewers("item-a", { positionSeconds: 10, paused: false });
+  nowMs += 1_000;
+  await client.syncViewers("item-a", { positionSeconds: 11, paused: false });
+  nowMs += 30_000;
+  await client.syncViewers("item-a", { positionSeconds: 41, paused: false });
+  nowMs += 1_000;
+  await client.syncViewers("item-b", { positionSeconds: 0, paused: false });
+
+  const playCalls = calls.filter(call => call.url.includes("playCommand=PlayNow"));
+  assert.equal(playCalls.length, 3);
+  assert.match(playCalls[0].url, /itemIds=item-a/);
+  assert.match(playCalls[1].url, /itemIds=item-a/);
+  assert.match(playCalls[2].url, /itemIds=item-b/);
+});
