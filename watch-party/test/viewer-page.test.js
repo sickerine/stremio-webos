@@ -113,6 +113,7 @@ test("a fresh viewer needs no login and reveals only active TV video", async () 
   intervals[0]();
   assert.equal(elements.waiting.hidden, true);
   assert.equal(elements.player.hidden, false);
+  assert.equal(frames[0].contentWindow.location.hash, "#/video");
   socket.message({ type: "viewer-state", mode: "waiting" });
   assert.equal(elements.waiting.hidden, false);
   assert.equal(elements.player.hidden, true);
