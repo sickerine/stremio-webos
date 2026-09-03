@@ -19,11 +19,9 @@ export function createJellyfinClient(options = {}) {
   const libraryName = options.libraryName || process.env.JELLYFIN_LIBRARY_NAME || "Watch Party";
   const deviceId = options.deviceId || process.env.JELLYFIN_DEVICE_ID || "stremio-tv-bridge";
   const fetchImplementation = options.fetchImplementation || fetch;
-  const now = options.now || Date.now;
-  const playCommandRetryMs = options.playCommandRetryMs || 30_000;
   let accessToken = "";
   let user = null;
-  const pendingStarts = new Map();
+  const browserAssignments = new Map();
 
   async function request(pathname, requestOptions = {}) {
     const headers = new Headers(requestOptions.headers);
@@ -151,15 +149,16 @@ export function createJellyfinClient(options = {}) {
     const sessions = await controllableBrowserSessions();
     await Promise.all(sessions.map(async session => {
       if (session.NowPlayingItem?.Id !== itemId) {
-        const pending = pendingStarts.get(session.Id);
-        if (pending?.itemId === itemId && now() - pending.sentAtMs < playCommandRetryMs) return;
+        const assignment = browserAssignments.get(session.Id);
+        if (assignment?.itemId === itemId
+            && (assignment.awaitingConfirmation || !session.NowPlayingItem)) return;
         await playSession(session.Id, itemId, state.positionSeconds);
-        pendingStarts.set(session.Id, { itemId, sentAtMs: now() });
+        browserAssignments.set(session.Id, { itemId, awaitingConfirmation: true });
         if (state.paused) await commandSession(session.Id, "Pause", state.positionSeconds);
         return;
       }
 
-      pendingStarts.delete(session.Id);
+      browserAssignments.set(session.Id, { itemId, awaitingConfirmation: false });
 
       const browserPosition = Number(session.PlayState?.PositionTicks || 0) / 10_000_000;
       const shouldSeek = actions.includes("seek")

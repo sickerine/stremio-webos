@@ -87,12 +87,15 @@ test("browser sessions receive direct play, pause, resume, and seek commands", a
   assert.equal(calls.some(call => call.url.includes("SyncPlay") || call.url.includes("Buffering")), false);
 });
 
-test("a pending browser start is not resent while Jellyfin is still loading it", async () => {
+test("a browser item is started once even while loading or after playback ends", async () => {
   const calls = [];
-  let nowMs = 10_000;
   const browserWithoutPlayback = {
     Id: "browser-1", Client: "Jellyfin Web", SupportsRemoteControl: true,
     NowPlayingItem: null, PlayState: { IsPaused: false, CanSeek: true },
+  };
+  const browserPlayingItemA = {
+    ...browserWithoutPlayback,
+    NowPlayingItem: { Id: "item-a" },
   };
   const responses = [
     jsonResponse({ StartupWizardCompleted: true }),
@@ -100,28 +103,24 @@ test("a pending browser start is not resent while Jellyfin is still loading it",
     jsonResponse(null, 204), jsonResponse([{ Name: "Watch Party" }]),
     jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
     jsonResponse([browserWithoutPlayback]),
-    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+    jsonResponse([browserPlayingItemA]),
+    jsonResponse([browserWithoutPlayback]),
     jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
   ];
   const client = createJellyfinClient({
     baseUrl: "http://jellyfin.test",
-    now: () => nowMs,
-    playCommandRetryMs: 30_000,
     fetchImplementation: async (url, options) => { calls.push({ url, options }); return responses.shift(); },
   });
   await client.initialize();
 
   await client.syncViewers("item-a", { positionSeconds: 10, paused: false });
-  nowMs += 1_000;
   await client.syncViewers("item-a", { positionSeconds: 11, paused: false });
-  nowMs += 30_000;
-  await client.syncViewers("item-a", { positionSeconds: 41, paused: false });
-  nowMs += 1_000;
+  await client.syncViewers("item-a", { positionSeconds: 12, paused: false });
+  await client.syncViewers("item-a", { positionSeconds: 1_430, paused: true });
   await client.syncViewers("item-b", { positionSeconds: 0, paused: false });
 
   const playCalls = calls.filter(call => call.url.includes("playCommand=PlayNow"));
-  assert.equal(playCalls.length, 3);
+  assert.equal(playCalls.length, 2);
   assert.match(playCalls[0].url, /itemIds=item-a/);
-  assert.match(playCalls[1].url, /itemIds=item-a/);
-  assert.match(playCalls[2].url, /itemIds=item-b/);
+  assert.match(playCalls[1].url, /itemIds=item-b/);
 });
