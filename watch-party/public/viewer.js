@@ -185,6 +185,7 @@ export function createPassiveViewer(options = {}) {
           setStatus("Connecting to the TV", "Preparing the current stream.");
           return;
         }
+        if (frameWindow.location?.hash !== "#/video") frameWindow.location.hash = "#/video";
         synchronizeVideo(video);
         waiting.hidden = true;
         player.hidden = false;
