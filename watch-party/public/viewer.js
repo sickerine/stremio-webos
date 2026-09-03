@@ -50,6 +50,7 @@ export function createPassiveViewer(options = {}) {
   const statusTitle = document.getElementById("status-title");
   const statusBody = document.getElementById("status-body");
   const soundPrompt = document.getElementById("sound-prompt");
+  const coldPausedHoverCatcher = document.getElementById("cold-paused-hover-catcher");
   let frame = null;
   let frameMonitor = null;
   let frameBootstrap = null;
@@ -61,6 +62,7 @@ export function createPassiveViewer(options = {}) {
   let generation = 0;
   let socket = null;
   let reconnectTimer = null;
+  let coldPausedHideTimer = null;
   let stopped = false;
   const mediaGuards = new WeakMap();
   const viewerDeviceId = storage.getItem("stremio-watch-device-id") || createDeviceId();
@@ -79,6 +81,9 @@ export function createPassiveViewer(options = {}) {
     frame = null;
     frameBootstrap = null;
     autoplayAttempt = null;
+    if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
+    coldPausedHideTimer = null;
+    coldPausedHoverCatcher.hidden = true;
     soundPrompt.hidden = true;
     player.replaceChildren();
     player.hidden = true;
@@ -88,6 +93,10 @@ export function createPassiveViewer(options = {}) {
     activeSessionId = null;
     tvPositionSeconds = null;
     autoplayAttempt = null;
+    if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
+    coldPausedHideTimer = null;
+    coldPausedHoverCatcher.hidden = true;
+    setColdPausedControlsVisible(false);
     soundPrompt.hidden = true;
     player.hidden = true;
     setStatus(title, body);
@@ -250,12 +259,31 @@ export function createPassiveViewer(options = {}) {
     protectVideo(video);
   }
 
-  function syncColdPausedHover(frameElement, frameDocument, video) {
-    const coldPaused = video?.paused && video.played?.length === 0;
-    frameDocument.documentElement?.classList?.toggle(
-      "cold-paused-hover",
-      Boolean(coldPaused && frameElement.matches?.(":hover")),
-    );
+  function setColdPausedControlsVisible(visible) {
+    try {
+      frame?.contentWindow?.document?.documentElement?.classList?.toggle("cold-paused-hover", visible);
+    } catch (error) {}
+  }
+
+  function showColdPausedControls() {
+    const video = currentVideo();
+    if (!video?.paused || video.played?.length !== 0) return;
+    setColdPausedControlsVisible(true);
+    if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
+    coldPausedHideTimer = setTimeoutImplementation(() => {
+      coldPausedHideTimer = null;
+      setColdPausedControlsVisible(false);
+    }, 3_000);
+  }
+
+  function syncColdPausedHover(frameDocument, video) {
+    const coldPaused = Boolean(activeSessionId && video?.paused && video.played?.length === 0);
+    coldPausedHoverCatcher.hidden = !coldPaused;
+    if (!coldPaused) {
+      if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
+      coldPausedHideTimer = null;
+      frameDocument.documentElement?.classList?.toggle("cold-paused-hover", false);
+    }
   }
 
   function watchFrame(nextFrame) {
@@ -266,7 +294,7 @@ export function createPassiveViewer(options = {}) {
         const frameDocument = frameWindow?.document;
         const video = frameDocument?.querySelector("video");
         hardenPlayer(frameDocument, video);
-        syncColdPausedHover(nextFrame, frameDocument, video);
+        syncColdPausedHover(frameDocument, video);
         if (!activeSessionId) return;
         if (!video) {
           setStatus("Connecting to the TV", "Preparing the current stream.");
@@ -362,6 +390,8 @@ export function createPassiveViewer(options = {}) {
 
 
   soundPrompt.addEventListener("click", enableSound);
+  coldPausedHoverCatcher.addEventListener("mouseenter", showColdPausedControls);
+  coldPausedHoverCatcher.addEventListener("mousemove", showColdPausedControls);
 
   showWaiting();
   prepareFrame().catch(() => {});
