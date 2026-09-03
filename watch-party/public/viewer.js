@@ -71,8 +71,8 @@ export function createPassiveViewer(options = {}) {
   const soundPrompt = document.getElementById("sound-prompt");
   let frame = null;
   let frameMonitor = null;
+  let frameBootstrap = null;
   let activeSessionId = null;
-  let bootingSessionId = null;
   let tvPaused = true;
   let tvPositionSeconds = null;
   let tvPositionReceivedAtMs = 0;
@@ -90,11 +90,12 @@ export function createPassiveViewer(options = {}) {
     waiting.hidden = false;
   }
 
-  function clearFrame() {
+  function disposeFrame() {
     if (frameMonitor) clearIntervalImplementation(frameMonitor);
     frameMonitor = null;
     if (frame) frame.src = "about:blank";
     frame = null;
+    frameBootstrap = null;
     autoplayAttempt = null;
     soundPrompt.hidden = true;
     player.replaceChildren();
@@ -102,11 +103,11 @@ export function createPassiveViewer(options = {}) {
   }
 
   function showWaiting(title = "Waiting for the TV", body = "Playback will appear here automatically.") {
-    generation += 1;
     activeSessionId = null;
-    bootingSessionId = null;
     tvPositionSeconds = null;
-    clearFrame();
+    autoplayAttempt = null;
+    soundPrompt.hidden = true;
+    player.hidden = true;
     setStatus(title, body);
   }
 
@@ -212,12 +213,13 @@ export function createPassiveViewer(options = {}) {
 
   function watchFrame(nextFrame) {
     frameMonitor = setIntervalImplementation(() => {
-      if (nextFrame !== frame || !activeSessionId) return;
+      if (nextFrame !== frame) return;
       try {
         const frameWindow = nextFrame.contentWindow;
         const frameDocument = frameWindow?.document;
         const video = frameDocument?.querySelector("video");
         hardenPlayer(frameDocument);
+        if (!activeSessionId) return;
         if (!video || video.readyState < 2) {
           setStatus("Connecting to the TV", "Preparing the current stream.");
           return;
@@ -232,20 +234,18 @@ export function createPassiveViewer(options = {}) {
     }, 250);
   }
 
-  async function showPlaying(message) {
-    activeSessionId = message.sessionId;
-    if (frame || bootingSessionId === message.sessionId) return;
-    bootingSessionId = message.sessionId;
+  function prepareFrame() {
+    if (frame) return Promise.resolve(frame);
+    if (frameBootstrap) return frameBootstrap;
     const bootGeneration = ++generation;
-    setStatus("Connecting to the TV", message.title || "Preparing the current stream.");
-    try {
+    frameBootstrap = (async () => {
       const response = await fetchImplementation("/api/viewer-session", {
         cache: "no-store",
         headers: { "x-viewer-device-id": viewerDeviceId },
       });
       if (!response.ok) throw new Error(`Viewer session failed (${response.status})`);
       const session = await response.json();
-      if (bootGeneration !== generation || activeSessionId !== message.sessionId) return;
+      if (bootGeneration !== generation || stopped) return null;
       writeJellyfinSession(session);
       const nextFrame = document.createElement("iframe");
       nextFrame.title = "TV playback";
@@ -253,14 +253,29 @@ export function createPassiveViewer(options = {}) {
       nextFrame.allowFullscreen = true;
       nextFrame.src = "/web/#/video";
       frame = nextFrame;
-      bootingSessionId = null;
       player.replaceChildren(nextFrame);
-      player.hidden = false;
+      player.hidden = !activeSessionId;
       watchFrame(nextFrame);
+      return nextFrame;
+    })().finally(() => {
+      frameBootstrap = null;
+    });
+    return frameBootstrap;
+  }
+
+  async function showPlaying(message) {
+    const sessionChanged = activeSessionId !== message.sessionId;
+    activeSessionId = message.sessionId;
+    if (sessionChanged || !frame) {
+      setStatus("Connecting to the TV", message.title || "Preparing the current stream.");
+    }
+    try {
+      await prepareFrame();
+      if (activeSessionId === message.sessionId && frame) player.hidden = false;
     } catch (error) {
-      if (bootGeneration !== generation) return;
-      bootingSessionId = null;
-      setStatus("Unable to connect", "Retrying when the TV sends its next update.");
+      if (activeSessionId === message.sessionId) {
+        setStatus("Unable to connect", "Retrying when the TV sends its next update.");
+      }
     }
   }
 
@@ -303,6 +318,7 @@ export function createPassiveViewer(options = {}) {
   document.addEventListener?.("keydown", enableSound, true);
 
   showWaiting();
+  prepareFrame().catch(() => {});
   connect();
 
   return {
@@ -310,7 +326,7 @@ export function createPassiveViewer(options = {}) {
       stopped = true;
       generation += 1;
       if (reconnectTimer) clearTimeoutImplementation(reconnectTimer);
-      clearFrame();
+      disposeFrame();
       try { socket?.close(); } catch (error) {}
       socket = null;
     },

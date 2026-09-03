@@ -12,8 +12,16 @@ RUN apk add --no-cache curl unzip \
     && mkdir -p /plugin \
     && unzip -q /tmp/subtitle-extract.zip -d /plugin
 
+FROM node:22-alpine AS jellyfin_web
+
+COPY --from=jellyfin/jellyfin:10.11.11 /jellyfin/jellyfin-web/ /jellyfin-web/
+COPY patch-hls-profile.mjs /tmp/patch-hls-profile.mjs
+
+RUN node /tmp/patch-hls-profile.mjs /jellyfin-web
+
 FROM jellyfin/jellyfin:10.11.11
 
+COPY --from=jellyfin_web /jellyfin-web/ /jellyfin/jellyfin-web/
 COPY --from=subtitle_extract /plugin/ /opt/subtitle-extract/
 COPY subtitle-extract.xml /opt/subtitle-extract/Jellyfin.Plugin.SubtitleExtract.xml
 COPY entrypoint.sh /usr/local/bin/watch-party-jellyfin-entrypoint
