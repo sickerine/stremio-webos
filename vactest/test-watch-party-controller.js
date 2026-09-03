@@ -44,18 +44,22 @@ const storage = {
     watchPartyUrl: 'ws://192.168.1.47:3211/ws'
 };
 const intervals = [];
+const timeouts = [];
 const sandbox = {
     Date,
     WebSocket: FakeWebSocket,
     clearInterval() {},
-    clearTimeout() {},
+    clearTimeout(id) { if (timeouts[id - 1]) timeouts[id - 1].cancelled = true; },
     console,
     document: { title: 'Stremio Patched' },
     location: { hash: '#/player/a/b/c/d/e/kitsu%3A49444%3A3' },
     localStorage: { getItem(key) { return storage[key] == null ? null : storage[key]; } },
     performance: { now() { return 1_000; } },
     setInterval(callback) { intervals.push(callback); return intervals.length; },
-    setTimeout() { return 1; },
+    setTimeout(callback, delay) {
+        timeouts.push({ callback, delay, cancelled: false });
+        return timeouts.length;
+    },
     window: {
         __assCtl: {
             video,
@@ -91,5 +95,22 @@ assert.ok(socket.sent[1].state.sequence > first.state.sequence);
 video.emit('waiting');
 video.emit('stalled');
 assert.strictEqual(socket.sent.length, 2, 'buffering noise never generates sync commands');
+
+sandbox.window.__assCtl = null;
+intervals[0]();
+const transientIdle = timeouts.find(timer => timer.delay === 1500 && !timer.cancelled);
+assert.ok(transientIdle, 'leaving the player schedules an idle transition');
+sandbox.window.__assCtl = { video, clock: { now() { return 12.5; } } };
+intervals[0]();
+assert.strictEqual(transientIdle.cancelled, true, 'a fast player replacement cancels idle');
+transientIdle.callback();
+assert.strictEqual(socket.sent.length, 2, 'a cancelled idle transition sends nothing');
+
+sandbox.window.__assCtl = null;
+intervals[0]();
+const confirmedIdle = timeouts.findLast(timer => timer.delay === 1500 && !timer.cancelled);
+confirmedIdle.callback();
+assert.strictEqual(socket.sent.length, 3, 'leaving playback publishes idle after the grace period');
+assert.deepStrictEqual(socket.sent[2], { type: 'idle', sessionId: first.state.sessionId });
 
 console.log('watch-party controller tests passed');

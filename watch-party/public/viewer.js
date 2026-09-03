@@ -1,0 +1,207 @@
+const PLAYER_RESTRICTIONS = `
+  .headerBackButton,
+  .headerHomeButton,
+  .btnPreviousTrack,
+  .btnNextTrack,
+  .btnPreviousChapter,
+  .btnNextChapter,
+  .btnRewind,
+  .btnPause,
+  .btnFastForward,
+  .btnUserRating,
+  .osdPositionSliderContainer { display: none !important; }
+`;
+
+export function createPassiveViewer(options = {}) {
+  const document = options.document;
+  const location = options.location;
+  const storage = options.storage;
+  const fetchImplementation = options.fetchImplementation;
+  const WebSocketImplementation = options.WebSocketImplementation;
+  const setIntervalImplementation = options.setIntervalImplementation;
+  const clearIntervalImplementation = options.clearIntervalImplementation;
+  const setTimeoutImplementation = options.setTimeoutImplementation;
+  const clearTimeoutImplementation = options.clearTimeoutImplementation;
+  const now = options.now || Date.now;
+
+  const waiting = document.getElementById("waiting");
+  const player = document.getElementById("player");
+  const statusTitle = document.getElementById("status-title");
+  const statusBody = document.getElementById("status-body");
+  let frame = null;
+  let frameMonitor = null;
+  let activeSessionId = null;
+  let bootingSessionId = null;
+  let generation = 0;
+  let socket = null;
+  let reconnectTimer = null;
+  let stopped = false;
+
+  function setStatus(title, body) {
+    statusTitle.textContent = title;
+    statusBody.textContent = body;
+    waiting.hidden = false;
+  }
+
+  function clearFrame() {
+    if (frameMonitor) clearIntervalImplementation(frameMonitor);
+    frameMonitor = null;
+    if (frame) frame.src = "about:blank";
+    frame = null;
+    player.replaceChildren();
+    player.hidden = true;
+  }
+
+  function showWaiting(title = "Waiting for the TV", body = "Playback will appear here automatically.") {
+    generation += 1;
+    activeSessionId = null;
+    bootingSessionId = null;
+    clearFrame();
+    setStatus(title, body);
+  }
+
+  function writeJellyfinSession(session) {
+    if (!session?.serverId || !session?.userId || !session?.accessToken || !session?.user) {
+      throw new Error("Incomplete viewer session");
+    }
+    const address = location.origin;
+    storage.setItem("enableAutoLogin", "true");
+    storage.setItem(`user-${session.userId}-${session.serverId}`, JSON.stringify(session.user));
+    storage.setItem("jellyfin_credentials", JSON.stringify({
+      Servers: [{
+        DateLastAccessed: now(),
+        LastConnectionMode: 2,
+        ManualAddress: address,
+        manualAddressOnly: true,
+        Name: "Stremio Watch",
+        Id: session.serverId,
+        LocalAddress: address,
+        AccessToken: session.accessToken,
+        UserId: session.userId,
+      }],
+    }));
+  }
+
+  function hardenPlayer(frameDocument) {
+    if (!frameDocument || frameDocument.getElementById?.("passive-viewer-restrictions")) return;
+    const style = frameDocument.createElement?.("style");
+    if (style) {
+      style.id = "passive-viewer-restrictions";
+      style.textContent = PLAYER_RESTRICTIONS;
+      frameDocument.head?.appendChild(style);
+    }
+    frameDocument.addEventListener?.("keydown", event => {
+      if ([" ", "k", "j", "l", "arrowleft", "arrowright", "pagedown", "pageup"].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+  }
+
+  function watchFrame(nextFrame) {
+    frameMonitor = setIntervalImplementation(() => {
+      if (nextFrame !== frame || !activeSessionId) return;
+      try {
+        const frameWindow = nextFrame.contentWindow;
+        const frameDocument = frameWindow?.document;
+        const video = frameDocument?.querySelector("video");
+        hardenPlayer(frameDocument);
+        if (!frameWindow?.location.hash.startsWith("#/video") || !video || video.readyState < 2) {
+          player.hidden = true;
+          setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
+          return;
+        }
+        waiting.hidden = true;
+        player.hidden = false;
+      } catch (error) {
+        player.hidden = true;
+        setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
+      }
+    }, 250);
+  }
+
+  async function showPlaying(message) {
+    activeSessionId = message.sessionId;
+    if (frame || bootingSessionId === message.sessionId) return;
+    bootingSessionId = message.sessionId;
+    const bootGeneration = ++generation;
+    setStatus("Connecting to the TV", message.title || "Preparing the current stream and subtitles.");
+    try {
+      const response = await fetchImplementation("/api/viewer-session", { cache: "no-store" });
+      if (!response.ok) throw new Error(`Viewer session failed (${response.status})`);
+      const session = await response.json();
+      if (bootGeneration !== generation || activeSessionId !== message.sessionId) return;
+      writeJellyfinSession(session);
+      const nextFrame = document.createElement("iframe");
+      nextFrame.title = "TV playback";
+      nextFrame.allow = "autoplay; fullscreen; picture-in-picture";
+      nextFrame.allowFullscreen = true;
+      nextFrame.src = "/web/#/home";
+      frame = nextFrame;
+      bootingSessionId = null;
+      player.replaceChildren(nextFrame);
+      player.hidden = true;
+      watchFrame(nextFrame);
+    } catch (error) {
+      if (bootGeneration !== generation) return;
+      bootingSessionId = null;
+      setStatus("Unable to connect", "Retrying when the TV sends its next update.");
+    }
+  }
+
+  function handleViewerState(message) {
+    if (message?.type !== "viewer-state") return;
+    if (message.mode === "playing" && message.sessionId) {
+      showPlaying(message);
+      return;
+    }
+    if (message.mode === "waiting") showWaiting();
+  }
+
+  function connect() {
+    if (stopped) return;
+    if (reconnectTimer) clearTimeoutImplementation(reconnectTimer);
+    reconnectTimer = null;
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocketImplementation(`${protocol}//${location.host}/ws?role=viewer`);
+    socket.addEventListener("message", event => {
+      try { handleViewerState(JSON.parse(event.data)); } catch (error) {}
+    });
+    socket.addEventListener("close", () => {
+      socket = null;
+      showWaiting("Reconnecting", "Trying to reach the TV bridge.");
+      if (!stopped) reconnectTimer = setTimeoutImplementation(connect, 1_000);
+    });
+    socket.addEventListener("error", () => {
+      try { socket.close(); } catch (error) {}
+    });
+  }
+
+  showWaiting();
+  connect();
+
+  return {
+    stop() {
+      stopped = true;
+      generation += 1;
+      if (reconnectTimer) clearTimeoutImplementation(reconnectTimer);
+      clearFrame();
+      try { socket?.close(); } catch (error) {}
+      socket = null;
+    },
+  };
+}
+
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  createPassiveViewer({
+    document,
+    location,
+    storage: localStorage,
+    fetchImplementation: fetch,
+    WebSocketImplementation: WebSocket,
+    setIntervalImplementation: setInterval,
+    clearIntervalImplementation: clearInterval,
+    setTimeoutImplementation: setTimeout,
+    clearTimeoutImplementation: clearTimeout,
+  });
+}

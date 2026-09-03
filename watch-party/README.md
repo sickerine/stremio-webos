@@ -1,6 +1,8 @@
-# Stremio Watch Party
+# Stremio Watch
 
-Jellyfin provides the browser player, ASS/SSA subtitle rendering, media probing, and remote-session controls. The bridge imports the TV's selected HTTP stream as a `.strm` item and sends meaningful TV play, pause, and seek changes directly to every open Jellyfin browser session.
+Open one link and the page follows the LG TV. It waits when the TV is idle, starts the current stream automatically, follows play, pause, and seek changes, and returns to waiting when TV playback stops.
+
+Jellyfin remains behind the page as the playback engine. It provides media probing, remuxing, transcoding, ASS/SSA subtitle rendering, embedded fonts, and browser playback. Viewers never need to see its library or login screen.
 
 ## Run
 
@@ -8,7 +10,7 @@ Jellyfin provides the browser player, ASS/SSA subtitle rendering, media probing,
 docker compose up --build -d
 ```
 
-Open `http://localhost:3210/web/` and sign in with `watchparty` / `watchparty`. Playback starts automatically when the TV starts a stream. The account automatically prefers English subtitles and always enables an available subtitle track.
+Open `http://localhost:3210/`. No login or playback selection is required. English subtitles are preferred automatically when the release contains them.
 
 The Stremio TV bridge connects to:
 
@@ -17,10 +19,11 @@ localStorage.setItem('watchPartyEnabled', '1');
 localStorage.setItem('watchPartyUrl', 'ws://YOUR_COMPUTER_IP:3211/ws');
 ```
 
-## Why Jellyfin
+## Runtime behavior
 
 - Browsers direct-play supported TorBox streams instead of always transcoding video.
 - Unsupported formats use Jellyfin's normal remux/transcode decision tree.
 - Embedded ASS subtitles and fonts render through Jellyfin's libass player.
-- Jellyfin's remote-session API controls each browser without a fake SyncPlay client or buffer-wait state machine.
+- The public page exposes only the current TV playback. Direct top-level Jellyfin pages redirect to the waiting page.
+- A short disconnect grace period prevents TV WebSocket reconnects from flashing the viewer back to waiting.
 - Docker limits Jellyfin to two CPU cores and 3 GiB of memory, and limits the bridge to half a core and 256 MiB.

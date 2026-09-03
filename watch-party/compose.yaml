@@ -5,8 +5,6 @@ services:
     image: jellyfin/jellyfin:10.11.11
     container_name: stremio-watch-party-jellyfin
     init: true
-    ports:
-      - "3210:8096"
     volumes:
       - jellyfin-config:/config
       - jellyfin-cache:/cache
@@ -32,6 +30,7 @@ services:
       JELLYFIN_USERNAME: ${JELLYFIN_USERNAME:-watchparty}
       JELLYFIN_PASSWORD: ${JELLYFIN_PASSWORD:-watchparty}
     ports:
+      - "3210:3211"
       - "3211:3211"
     volumes:
       - jellyfin-media:/media
