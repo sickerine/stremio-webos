@@ -187,17 +187,17 @@ export function createBridgeServer({
       const state = normalizeState(message.state, now());
       if (!state) { socket.send(JSON.stringify({ type: "error", code: "invalid-state" })); return; }
       if (!ready) { socket.send(JSON.stringify({ type: "error", code: "not-ready" })); return; }
+      viewerState = {
+        type: "viewer-state",
+        mode: "playing",
+        sessionId: state.sessionId,
+        title: state.title,
+        paused: state.paused,
+        positionSeconds: state.positionSeconds,
+      };
+      broadcastViewerState();
       try {
         const actions = await activeCoordinator.update(state);
-        viewerState = {
-          type: "viewer-state",
-          mode: "playing",
-          sessionId: state.sessionId,
-          title: state.title,
-          paused: state.paused,
-          positionSeconds: state.positionSeconds,
-        };
-        broadcastViewerState();
         socket.send(JSON.stringify({ type: "ack", sequence: state.sequence, actions }));
       } catch (error) {
         lastError = error;

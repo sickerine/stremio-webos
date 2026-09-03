@@ -121,6 +121,36 @@ test("a viewer returns to waiting when the TV disappears", async () => {
   viewer.close();
 });
 
+test("viewer timing is broadcast without waiting for Jellyfin work", async () => {
+  let finishUpdate;
+  const update = new Promise(resolve => { finishUpdate = () => resolve([]); });
+  const server = createBridgeServer({
+    coordinator: { update: async () => update, status: () => null },
+  });
+  await server.listen(0, "127.0.0.1");
+  servers.push(server);
+  const port = server.address().port;
+  const viewer = new WebSocket(`ws://127.0.0.1:${port}/ws?role=viewer`);
+  const initial = nextMessage(viewer, "viewer-state");
+  await new Promise((resolve, reject) => { viewer.once("open", resolve); viewer.once("error", reject); });
+  await initial;
+  const tv = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv`);
+  await new Promise((resolve, reject) => { tv.once("open", resolve); tv.once("error", reject); });
+
+  const playing = nextMessage(viewer, "viewer-state");
+  tv.send(JSON.stringify({
+    type: "state",
+    state: {
+      sessionId: "episode-1", sequence: 1, positionSeconds: 123, paused: false,
+      mediaUrl: "https://torbox.example/episode.mkv", title: "Episode 1",
+    },
+  }));
+  assert.equal((await playing).positionSeconds, 123);
+  finishUpdate();
+  tv.close();
+  viewer.close();
+});
+
 test("the public URL serves the passive viewer and provisions Jellyfin without a login", async () => {
   const viewerSession = {
     serverId: "server-id", userId: "user-id", accessToken: "access-token",
