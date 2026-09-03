@@ -1,5 +1,6 @@
 const CLIENT_NAME = "Stremio TV Bridge";
 const CLIENT_VERSION = "1.0.0";
+const PLAY_ASSIGNMENT_RETRY_MS = 10_000;
 
 function authorizationHeader(
   deviceId,
@@ -25,6 +26,7 @@ export function createJellyfinClient(options = {}) {
   const libraryName = options.libraryName || process.env.JELLYFIN_LIBRARY_NAME || "Watch Party";
   const deviceId = options.deviceId || process.env.JELLYFIN_DEVICE_ID || "stremio-tv-bridge";
   const fetchImplementation = options.fetchImplementation || fetch;
+  const now = options.now || Date.now;
   let accessToken = "";
   let user = null;
   const browserAssignments = new Map();
@@ -178,14 +180,14 @@ export function createJellyfinClient(options = {}) {
       if (session.NowPlayingItem?.Id !== itemId) {
         const assignment = browserAssignments.get(session.Id);
         if (assignment?.itemId === itemId
-            && (assignment.awaitingConfirmation || !session.NowPlayingItem)) return;
+            && now() - assignment.lastActivityAtMs < PLAY_ASSIGNMENT_RETRY_MS) return;
         await playSession(session.Id, itemId, state.positionSeconds);
-        browserAssignments.set(session.Id, { itemId, awaitingConfirmation: true });
+        browserAssignments.set(session.Id, { itemId, lastActivityAtMs: now() });
         if (state.paused) await commandSession(session.Id, "Pause", state.positionSeconds);
         return;
       }
 
-      browserAssignments.set(session.Id, { itemId, awaitingConfirmation: false });
+      browserAssignments.set(session.Id, { itemId, lastActivityAtMs: now() });
 
       const browserPosition = Number(session.PlayState?.PositionTicks || 0) / 10_000_000;
       const shouldSeek = actions.includes("seek")

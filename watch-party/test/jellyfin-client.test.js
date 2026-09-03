@@ -87,7 +87,7 @@ test("browser sessions receive direct play, pause, resume, and seek commands", a
   assert.equal(calls.some(call => call.url.includes("SyncPlay") || call.url.includes("Buffering")), false);
 });
 
-test("a browser item is started once even while loading or after playback ends", async () => {
+test("a browser item is not restarted on ordinary heartbeats while loading", async () => {
   const calls = [];
   const browserWithoutPlayback = {
     Id: "browser-1", Client: "Jellyfin Web", SupportsRemoteControl: true,
@@ -123,6 +123,40 @@ test("a browser item is started once even while loading or after playback ends",
   assert.equal(playCalls.length, 2);
   assert.match(playCalls[0].url, /itemIds=item-a/);
   assert.match(playCalls[1].url, /itemIds=item-b/);
+});
+
+test("a reused browser session retries a lost play assignment after a bounded delay", async () => {
+  const calls = [];
+  let nowMs = 0;
+  const browserWithoutPlayback = {
+    Id: "browser-1", Client: "Jellyfin Web", SupportsRemoteControl: true,
+    NowPlayingItem: null, PlayState: { IsPaused: false, CanSeek: true },
+  };
+  const responses = [
+    jsonResponse({ StartupWizardCompleted: true }),
+    jsonResponse({ AccessToken: "token", User: { Id: "user-id", Configuration: {} } }),
+    jsonResponse(null, 204), jsonResponse([{ Name: "Watch Party" }]),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+    jsonResponse([browserWithoutPlayback]),
+    jsonResponse([browserWithoutPlayback]), jsonResponse(null, 204),
+  ];
+  const client = createJellyfinClient({
+    baseUrl: "http://jellyfin.test",
+    now: () => nowMs,
+    fetchImplementation: async (url, options) => { calls.push({ url, options }); return responses.shift(); },
+  });
+  await client.initialize();
+
+  await client.syncViewers("item-a", { positionSeconds: 10, paused: false });
+  nowMs = 9_999;
+  await client.syncViewers("item-a", { positionSeconds: 20, paused: false });
+  nowMs = 10_000;
+  await client.syncViewers("item-a", { positionSeconds: 30, paused: false });
+
+  const playCalls = calls.filter(call => call.url.includes("playCommand=PlayNow"));
+  assert.equal(playCalls.length, 2);
+  assert.match(playCalls[0].url, /startPositionTicks=100000000/);
+  assert.match(playCalls[1].url, /startPositionTicks=300000000/);
 });
 
 test("each passive browser receives its own Jellyfin device session", async () => {
