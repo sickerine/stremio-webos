@@ -1,11 +1,4 @@
 const PASSIVE_PLAYER_STYLE = `
-  .skinHeader,
-  .videoOsdBottom {
-    display: flex !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-  }
-
   .headerBackButton {
     display: none !important;
   }
