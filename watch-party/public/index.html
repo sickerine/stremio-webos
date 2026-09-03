@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Stremio Watch</title>
+  <link rel="stylesheet" href="/viewer.css">
+</head>
+<body>
+  <main id="waiting" aria-live="polite">
+    <div class="pulse" aria-hidden="true"></div>
+    <h1 id="status-title">Waiting for the TV</h1>
+    <p id="status-body">Playback will appear here automatically.</p>
+  </main>
+  <div id="player" hidden></div>
+  <script type="module" src="/viewer.js"></script>
+</body>
+</html>

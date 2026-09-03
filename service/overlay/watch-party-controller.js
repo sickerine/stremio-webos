@@ -20,6 +20,8 @@
     var sourceRevision = 0;
     var sequence = 0;
     var reconnectTimer = 0;
+    var idleTimer = 0;
+    var idleGeneration = 0;
     var lastHeartbeat = 0;
     var listeners = {};
 
@@ -73,8 +75,36 @@
         try { socket.send(JSON.stringify({ type: 'state', state: state() })); } catch (error) {}
     }
 
-    function playerEvent() {
-        return function () { publish(); };
+    function publishIdle() {
+        if (!sessionId || !socket || socket.readyState !== WebSocket.OPEN) return;
+        var stoppedSessionId = sessionId;
+        sessionId = null;
+        mediaUrl = null;
+        sequence = 0;
+        try { socket.send(JSON.stringify({ type: 'idle', sessionId: stoppedSessionId })); } catch (error) {}
+    }
+
+    function cancelIdle() {
+        idleGeneration += 1;
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = 0;
+    }
+
+    function scheduleIdle() {
+        if (!sessionId || idleTimer) return;
+        var generation = ++idleGeneration;
+        idleTimer = setTimeout(function () {
+            if (generation !== idleGeneration) return;
+            idleTimer = 0;
+            publishIdle();
+        }, 1500);
+    }
+
+    function playerEvent(name) {
+        return function () {
+            if (name === 'ended') scheduleIdle();
+            else publish();
+        };
     }
 
     function detach() {
@@ -93,14 +123,13 @@
         if (!video) return;
         ['play', 'pause', 'seeked', 'ratechange', 'ended']
             .forEach(function (name) {
-                listeners[name] = playerEvent();
+                listeners[name] = playerEvent(name);
                 video.addEventListener(name, listeners[name]);
             });
     }
 
-    function updateSource() {
-        var nextUrl = currentMedia();
-        if (!nextUrl || nextUrl === mediaUrl) return;
+    function updateSource(nextUrl) {
+        if (nextUrl === mediaUrl) return;
         mediaUrl = nextUrl;
         sourceRevision += 1;
         sequence = 0;
@@ -110,8 +139,18 @@
 
     function tick() {
         var controller = window.__assCtl;
-        attach(controller && controller.video && controller.video.isConnected !== false ? controller.video : null);
-        updateSource();
+        var nextVideo = controller && controller.video && controller.video.isConnected !== false
+            ? controller.video
+            : null;
+        var nextUrl = currentMedia();
+        var active = nextVideo && !nextVideo.ended && nextUrl;
+        attach(nextVideo);
+        if (!active) {
+            scheduleIdle();
+            return;
+        }
+        cancelIdle();
+        updateSource(nextUrl);
         var now = Date.now();
         if (sessionId && now - lastHeartbeat >= 1000) {
             lastHeartbeat = now;

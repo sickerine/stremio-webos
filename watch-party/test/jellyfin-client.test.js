@@ -15,7 +15,7 @@ test("initialization completes a fresh server, authenticates, and enables Englis
   const responses = [
     jsonResponse({ StartupWizardCompleted: false }), jsonResponse({ Name: "" }),
     jsonResponse(null, 204), jsonResponse(null, 204), jsonResponse(null, 204), jsonResponse(null, 204),
-    jsonResponse({ AccessToken: "token", User: { Id: "user-id", Configuration: { SubtitleMode: "Default" } } }),
+    jsonResponse({ ServerId: "server-id", AccessToken: "token", User: { Id: "user-id", Configuration: { SubtitleMode: "Default" } } }),
     jsonResponse(null, 204), jsonResponse([]), jsonResponse(null, 204),
   ];
   const client = createJellyfinClient({
@@ -32,6 +32,12 @@ test("initialization completes a fresh server, authenticates, and enables Englis
   assert.equal(userConfiguration.SubtitleMode, "Always");
   assert.equal(userConfiguration.SubtitleLanguagePreference, "eng");
   assert.equal(userConfiguration.RememberSubtitleSelections, true);
+  assert.deepEqual(client.viewerSession(), {
+    serverId: "server-id",
+    userId: "user-id",
+    accessToken: "token",
+    user: { Id: "user-id", Configuration: { SubtitleMode: "Default" } },
+  });
 });
 
 test("browser sessions receive direct play, pause, resume, and seek commands", async () => {

@@ -21,6 +21,7 @@ export function createJellyfinClient(options = {}) {
   const fetchImplementation = options.fetchImplementation || fetch;
   let accessToken = "";
   let user = null;
+  let serverId = "";
   const browserAssignments = new Map();
 
   async function request(pathname, requestOptions = {}) {
@@ -75,6 +76,7 @@ export function createJellyfinClient(options = {}) {
     });
     accessToken = result.AccessToken;
     user = result.User;
+    serverId = result.ServerId;
   }
 
   async function configureUser() {
@@ -180,6 +182,9 @@ export function createJellyfinClient(options = {}) {
     refreshLibrary,
     findItemByPath,
     syncViewers,
+    viewerSession() {
+      return { serverId, userId: user?.Id || "", accessToken, user };
+    },
     status() { return { authenticated: Boolean(accessToken), userId: user?.Id || null }; },
   };
 }
