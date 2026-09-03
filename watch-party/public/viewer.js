@@ -123,7 +123,7 @@ export function createPassiveViewer(options = {}) {
         const frameDocument = frameWindow?.document;
         const video = frameDocument?.querySelector("video");
         hardenPlayer(frameDocument);
-        if (!frameWindow?.location.hash.startsWith("#/video") || !video || video.readyState < 2) {
+        if (!video || video.readyState < 2) {
           setStatus("Connecting to the TV", "Preparing the current stream and subtitles.");
           return;
         }

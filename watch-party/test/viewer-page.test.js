@@ -107,11 +107,11 @@ test("a fresh viewer needs no login and reveals only active TV video", async () 
   assert.equal(elements.waiting.hidden, false);
   assert.equal(elements.player.hidden, false, "the covered iframe stays active for Jellyfin remote control");
 
-  frames[0].contentWindow.location.hash = "#/video";
   frames[0].contentWindow.document.querySelector = selector => selector === "video" ? { readyState: 4 } : null;
   intervals[0]();
   assert.equal(elements.waiting.hidden, true);
   assert.equal(elements.player.hidden, false);
+  assert.equal(frames[0].contentWindow.location.hash, "#/home", "remote playback does not change Jellyfin's route");
 
   socket.message({ type: "viewer-state", mode: "waiting" });
   assert.equal(elements.waiting.hidden, false);
