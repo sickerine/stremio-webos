@@ -244,7 +244,13 @@ test("the selected English subtitle is attached through Jellyfin's VTT endpoint"
     tracks.push(element);
     return element;
   };
-  frameDocument.querySelector = selector => selector === "video" ? video : null;
+  frameDocument.querySelector = selector => {
+    if (selector === "video") return video;
+    if (selector === "track[data-passive-viewer-subtitle]") {
+      return tracks.find(element => element.dataset.passiveViewerSubtitle === "true") || null;
+    }
+    return null;
+  };
   const video = new FakeElement();
   video.ownerDocument = frameDocument;
   video.readyState = 4;
@@ -263,4 +269,8 @@ test("the selected English subtitle is attached through Jellyfin's VTT endpoint"
   assert.equal(track.srclang, "en");
   assert.equal(track.track.mode, "showing");
   assert.equal(track.src, "/Videos/item-id/source-id/Subtitles/4/Stream.vtt?api_key=token");
+
+  track.track.mode = "disabled";
+  intervals[0]();
+  assert.equal(track.track.mode, "showing");
 });
