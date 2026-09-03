@@ -269,7 +269,7 @@ export function createPassiveViewer(options = {}) {
 
   function showColdPausedControls() {
     const video = currentVideo();
-    if (!video?.paused || video.played?.length !== 0) return;
+    if (!activeSessionId || activeSessionHasPlayed || !video?.paused) return;
     setColdPausedControlsVisible(true);
     if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
     coldPausedHideTimer = setTimeoutImplementation(() => {
