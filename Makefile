@@ -9,7 +9,7 @@ FFMPEG_SHA256 = f4149bb2b0784e30e99bdda85471c9b5930d3402014e934a5098b41d0f7201b1
 VERSION = $(shell python3 -c "import json; print(json.load(open('app/appinfo.json'))['version'])")
 IPK = $(APP_ID)_$(VERSION)_all.ipk
 
-.PHONY: test build package deploy launch restart clean
+.PHONY: test build package deploy launch restart clean watch-party-up watch-party-down watch-party-test
 
 test: build
 	@set -e; for t in vactest/test-*.js; do \
@@ -70,3 +70,12 @@ restart:
 
 clean:
 	rm -rf service/www service/server.js service/bin *.ipk
+
+watch-party-up:
+	docker compose -f watch-party/compose.yaml up --build -d
+
+watch-party-down:
+	docker compose -f watch-party/compose.yaml down
+
+watch-party-test:
+	npm --prefix watch-party test

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stremio Watch Party</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/vendor/hls.min.js"></script>
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">STREMIO</p>
+      <h1>Watch party</h1>
+    </div>
+    <div id="connection" class="status waiting"><span></span>Connecting</div>
+  </header>
+
+  <main>
+    <section class="player-shell">
+      <video id="player" playsinline controls></video>
+      <div id="empty-state" class="empty-state">
+        <p class="eyebrow">TV IS THE HOST</p>
+        <h2>Waiting for something to play</h2>
+        <p>Start an episode on the living-room TV. It will appear here.</p>
+      </div>
+      <div id="buffering" class="buffering" hidden>TV is buffering</div>
+    </section>
+
+    <section class="now-playing">
+      <div>
+        <p class="eyebrow">NOW PLAYING</p>
+        <h2 id="title">Nothing yet</h2>
+        <p id="detail">Room: home</p>
+      </div>
+      <button id="join" type="button" disabled>Join and enable audio</button>
+    </section>
+  </main>
+</body>
+</html>
