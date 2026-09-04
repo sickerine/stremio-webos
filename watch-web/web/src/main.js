@@ -176,13 +176,16 @@ video.addEventListener("playing", () => ui.setTv(tvState?.paused ? "Paused on th
 ui.onSound(() => { audioUnlocked = true; video.muted = false; ui.showSoundPrompt(false); if (tvState && !tvState.paused) video.play().catch(() => { video.muted = true; ui.showSoundPrompt(true); }); });
 video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.showSoundPrompt(true); }, { once: true });
 
-connectRelay({
+const relay = connectRelay({
   room,
   onConnection: st => ui.setConnection(st),
   onState: (state, resolveError, resolveHost) => {
     const now = Date.now();
+    // The relay stamps each sample on arrival (sentAtMs, relay clock). With the clock
+    // synced, read that in local time so transit latency drops out of the estimate.
+    const sampledAt = relay.toLocalMs(state.sentAtMs) ?? now;
     const snapUntil = tvJumped(tvState, state, now) ? now + SNAP_WINDOW_MS : (tvState?.snapUntil || 0);
-    tvState = { ...state, receivedAtMs: now, snapUntil };
+    tvState = { ...state, receivedAtMs: sampledAt, snapUntil };
     ui.setTitle(titleFor(state));
     ui.setTv(state.paused ? "Paused on the TV" : "In sync", state.paused ? "warn" : "ok");
     if (!session) {
@@ -210,6 +213,7 @@ window.__watch = () => {
   const s = session; const p = s?.pipeline;
   return {
     tv: tvState && { pos: tvState.positionSeconds, paused: tvState.paused, est: estimateTvPosition(tvState) },
+    clock: relay.clock(),
     video: { t: video.currentTime, paused: video.paused, rs: video.readyState, rate: video.playbackRate, muted: video.muted, w: video.videoWidth, h: video.videoHeight },
     buffered: p?.buffered() || [],
     tracks: p?.tracks && { video: { codec: p.tracks.video.codec, codecString: p.tracks.video.codecString, hdr: p.tracks.video.hdr }, audios: p.tracks.audios.map(a => ({ id: a.id, lang: a.language, codec: a.codec, ch: a.channels, playable: a.playable })), duration: p.tracks.duration },

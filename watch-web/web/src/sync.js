@@ -31,6 +31,14 @@ export function syncAction(currentSeconds, targetSeconds, { paused = false, snap
   return { type: "seek", positionSeconds: targetSeconds };
 }
 
+// Clock sync: each ping yields { rtt, offset } where offset = localMs - relayMs.
+// Trust the one that travelled fastest; queueing only ever inflates the others.
+export function bestOffset(samples) {
+  let best = null;
+  for (const s of samples) if (!best || s.rtt < best.rtt) best = s;
+  return best ? best.offset : null;
+}
+
 // Did this sample break from where the previous one predicted the TV would be?
 export function tvJumped(prev, state, nowMs = Date.now()) {
   if (!prev || prev.sessionId !== state.sessionId) return false;
