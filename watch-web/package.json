@@ -1,0 +1,30 @@
+{
+  "name": "stremio-watch-web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "assets": "rm -rf web/public/jassub && mkdir -p web/public && cp -R node_modules/jassub/dist web/public/jassub && cp node_modules/matroska-subtitles/dist/matroska-subtitles.min.js web/public/",
+    "dev": "npm run assets && vite",
+    "build": "npm run assets && vite build",
+    "start": "node server/server.js",
+    "postinstall": "npm run assets"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "jassub": "^2.5.14",
+    "libbitsub": "^1.12.1",
+    "matroska-subtitles": "^3.3.2",
+    "media-chrome": "^4.19.2",
+    "mediabunny": "^1.55.6",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "vite": "^8.2.2"
+  }
+}
