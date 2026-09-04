@@ -3,7 +3,7 @@ import { connectRelay } from "./relay.js";
 import { Pipeline } from "./player/pipeline.js";
 import { SubtitleDemux, AssRenderer } from "./subtitles/ass.js";
 import { TextSubtitles } from "./subtitles/text.js";
-import { estimateTvPosition, syncAction, tvJumped, SNAP_WINDOW_MS } from "./sync.js";
+import { estimateTvPosition, syncAction, tvJumped, tvStalled, SNAP_WINDOW_MS } from "./sync.js";
 
 const room = new URLSearchParams(location.search).get("room") || "home";
 const ui = buildUi(document.getElementById("app"));
@@ -142,10 +142,11 @@ async function follow() {
   if (!s.pipeline.sourceBuffer) return;
   if (Date.now() < tvState.holdUntil) return;          // a jump just arrived; wait for the next sample to confirm it
   const target = estimateTvPosition(tvState);
-  if (tvState.paused) { if (!video.paused) video.pause(); }
+  const hold = tvState.paused || tvState.buffering;          // TV sits on a frame: paused, or "playing" but not advancing
+  if (hold) { if (!video.paused) video.pause(); }
   else if (video.paused && video.readyState >= 2) { video.play().catch(() => {}); }
 
-  const act = syncAction(video.currentTime, target, { paused: tvState.paused, snap: Date.now() < tvState.snapUntil });
+  const act = syncAction(video.currentTime, target, { paused: hold, snap: Date.now() < tvState.snapUntil });
   if (act.type === "seek") {
     // If the target is already buffered, jump instantly. Otherwise a hard seek means
     // re-muxing from there, which clears the buffer; don't do that again until the
@@ -190,8 +191,11 @@ setInterval(() => {
 
 // Repaint ASS on the current frame when paused (no rVFC fires then).
 for (const ev of ["seeked", "pause", "timeupdate"]) video.addEventListener(ev, () => { if (video.paused) session?.ass.renderNow(); });
-video.addEventListener("waiting", () => ui.setTv(tvState?.paused ? "Paused on the TV" : "Buffering", tvState?.paused ? "warn" : ""));
-video.addEventListener("playing", () => ui.setTv(tvState?.paused ? "Paused on the TV" : "In sync", tvState?.paused ? "warn" : "ok"));
+// Status chip: "Buffering" only if a stall outlasts a seek's blip, so landings don't flash it.
+let waitingTimer = null;
+const tvChip = () => tvState?.paused ? ["Paused on the TV", "warn"] : tvState?.buffering ? ["TV is loading", "warn"] : ["In sync", "ok"];
+video.addEventListener("waiting", () => { clearTimeout(waitingTimer); waitingTimer = setTimeout(() => { if (video.readyState < 3 && !video.paused) ui.setTv("Buffering", ""); }, 600); });
+video.addEventListener("playing", () => { clearTimeout(waitingTimer); ui.setTv(...tvChip()); });
 
 ui.onSound(() => { audioUnlocked = true; video.muted = false; ui.showSoundPrompt(false); if (tvState && !tvState.paused) video.play().catch(() => { video.muted = true; ui.showSoundPrompt(true); }); });
 video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.showSoundPrompt(true); }, { once: true });
@@ -208,9 +212,10 @@ const relay = connectRelay({
     const jumped = tvJumped(tvState, state, now);
     const snapUntil = jumped ? now + SNAP_WINDOW_MS : (tvState?.snapUntil || 0);
     const holdUntil = jumped ? now + JUMP_HOLD_MS : (tvState?.holdUntil || 0);
-    tvState = { ...state, receivedAtMs: sampledAt, snapUntil, holdUntil };
+    const buffering = tvStalled(tvState, state, now);
+    tvState = { ...state, buffering, receivedAtMs: sampledAt, snapUntil, holdUntil };
     ui.setTitle(titleFor(state));
-    ui.setTv(state.paused ? "Paused on the TV" : "In sync", state.paused ? "warn" : "ok");
+    ui.setTv(state.paused ? "Paused on the TV" : buffering ? "TV is loading" : "In sync", state.paused || buffering ? "warn" : "ok");
     if (!session) {
       ui.setStage("resolve");
       ui.overlay(true, titleFor(state), resolveError ? unreachableText(resolveHost) : "The TV just started something.");

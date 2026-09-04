@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateTvPosition, syncAction, isBuffered, tvJumped, bestOffset } from "../web/src/sync.js";
+import { estimateTvPosition, syncAction, isBuffered, tvJumped, tvStalled, bestOffset } from "../web/src/sync.js";
 import { normalizeState, resolveRedirects, createRelayServer } from "../server/server.js";
 import { WebSocket } from "ws";
 import { ByteSource } from "../web/src/net/byte-source.js";
@@ -20,6 +20,14 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
   assert.equal(syncAction(100, 100.2, { paused: true }).type, "seek");
   assert.equal(syncAction(100, 100.05, { paused: true }).type, "none");
   assert.equal(syncAction(100, 101.5, { snap: true }).type, "seek");
+  assert.equal(syncAction(100, 100.2, { snap: true }).type, "none");     // playing: tolerate TV clock jitter after a seek
+  assert.equal(syncAction(100, 100.2, { paused: true }).type, "seek");   // paused: land on the frame
+  // a "playing" TV whose position does not move between samples is loading
+  const s0 = { sessionId: "a", positionSeconds: 0.2, paused: false, receivedAtMs: 0 };
+  assert.ok(tvStalled(s0, { sessionId: "a", positionSeconds: 0.2, paused: false }, 500));
+  assert.ok(!tvStalled(s0, { sessionId: "a", positionSeconds: 0.7, paused: false }, 500));
+  assert.ok(!tvStalled(s0, { sessionId: "a", positionSeconds: 0.2, paused: false }, 200));
+  assert.ok(!tvStalled(s0, { sessionId: "a", positionSeconds: 0.2, paused: true }, 500));
   const prev = { sessionId: "a", positionSeconds: 100, paused: false, playbackRate: 1, receivedAtMs: 0 };
   assert.ok(!tvJumped(prev, { sessionId: "a", positionSeconds: 101.1, paused: false }, 1000));
   assert.ok(tvJumped(prev, { sessionId: "a", positionSeconds: 130, paused: false }, 1000));
