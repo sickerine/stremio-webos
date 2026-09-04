@@ -5,7 +5,7 @@
 import { WebSocket } from "ws";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 const port = process.env.PORT || 3211, cmdFile = process.env.CMD || "/tmp/ww-tv-cmd";
-let url = process.env.URL, pos = Number(process.env.POS || 0), paused = process.env.PAUSED === "1", seq = 0, session = 1;
+let url = process.env.URL, pos = Number(process.env.POS || 0), paused = process.env.PAUSED === "1", seq = 0, session = Date.now().toString(36);
 const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv`);
 const state = () => ({ type: "state", state: { sessionId: `sim-${session}`, sequence: ++seq, positionSeconds: pos, paused, playbackRate: 1, buffering: false, mediaUrl: url, title: process.env.TITLE || "tv-sim", episodeId: "sim" } });
 const send = () => ws.send(JSON.stringify(state()));
@@ -26,6 +26,6 @@ function handle(c) {
   if (c === "pause") paused = true; else if (c === "play") paused = false;
   else if (c.startsWith("seek ")) pos = Number(c.slice(5));
   else if (c === "idle") { ws.send(JSON.stringify({ type: "idle", sessionId: `sim-${session}` })); console.log("[tv-sim] idle sent"); return; }
-  else if (c.startsWith("url ")) { const [u, p] = c.slice(4).trim().split(/\s+/); url = u; if (p) pos = Number(p); session++; seq = 0; }
+  else if (c.startsWith("url ")) { const [u, p] = c.slice(4).trim().split(/\s+/); url = u; if (p) pos = Number(p); session = Date.now().toString(36); seq = 0; }
   send(); console.log(`[tv-sim] ${c} -> pos=${pos.toFixed(1)} paused=${paused} session=${session}`);
 }
