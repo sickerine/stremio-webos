@@ -17,6 +17,8 @@
   "type": "module",
   "private": "true",
   "dependencies": {
+    "@mediabunny/ac3": "^1.55.6",
+    "@mediabunny/dts": "^1.55.6",
     "jassub": "^2.5.14",
     "libbitsub": "^1.12.1",
     "matroska-subtitles": "^3.3.2",

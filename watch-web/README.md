@@ -32,6 +32,7 @@ LG TV ──(play/pause/seek/position)──► relay ──(WebSocket)──►
 ## What works (verified against real TorBox streams)
 
 - H.264 and HEVC video, including 4K HEVC 10-bit HDR (hardware-decoded).
+- Dolby (AC-3/E-AC-3) and DTS audio, decoded and re-encoded to stereo Opus in-browser.
 - Styled ASS subtitles with embedded fonts, in Chrome and Firefox.
 - Many subtitle tracks; instant switching; SRT and ASS.
 - Multiple audio tracks (AAC/FLAC/Opus/MP3); instant switching.
@@ -39,11 +40,11 @@ LG TV ──(play/pause/seek/position)──► relay ──(WebSocket)──►
 
 ## Known gaps
 
-- **Dolby / DTS audio** (AC-3, E-AC-3, TrueHD, DTS) can't be decoded by any
-  browser. Most Blu-ray/WEB-DL movies use these, so they currently play
-  video-only. See `docs/AUDIO-FALLBACK.md` for the plan.
-- **CJK subtitle dialogue** needs a CJK fallback font bundled; embedded fonts
-  cover styling and signs but not full CJK dialogue.
+- **TrueHD** audio: no in-browser decoder yet (AC-3, E-AC-3, DTS are handled).
+- **Files with no seek index** (rare 4K x264 remuxes): seeking scans the file and
+  stalls; needs a read budget + graceful fallback.
+- **CJK subtitle dialogue** needs a bundled CJK fallback font; embedded fonts cover
+  styling and signs but not full CJK dialogue.
 - **Hi10P** (10-bit H.264, old fansubs): no hardware decode anywhere.
 
 ## Run

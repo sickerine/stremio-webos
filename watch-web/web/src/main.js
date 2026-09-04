@@ -148,7 +148,8 @@ window.__watch = () => {
     tracks: p?.tracks && { video: { codec: p.tracks.video.codec, codecString: p.tracks.video.codecString, hdr: p.tracks.video.hdr }, audios: p.tracks.audios.map(a => ({ id: a.id, lang: a.language, codec: a.codec, ch: a.channels, playable: a.playable })), duration: p.tracks.duration },
     selectedAudio: p?.selectedAudioId ?? null,
     subs: s && { tracks: s.subTracks.map(t => ({ n: t.number, lang: t.language, type: t.type, name: t.name })), selected: s.selectedSub, fonts: s.fonts, assEvents: Object.fromEntries([...s.ass.events].map(([k, v]) => [k, v.length])), activeAss: s.ass.activeTrack, jassub: Boolean(s.ass.jassub), jassubReady: s.ass.ready, pushed: s.ass.pushed, showCalls: s.ass.showCalls, assError: s.ass.lastError, demux: { ...s.demux.stats, firstCluster: s.demux.firstCluster, headerCursor: s.demux.headerCursor, cursor: s.demux.cursor, pending: s.demux.pending.size } },
-    net: p?.source && { requests: p.source.requests, fetchedMB: +(p.source.bytesFetched / 1048576).toFixed(1), size: p.source.size },
+    net: p?.source && { requests: p.source.requests, retries: p.source.retries || 0, fetchedMB: +(p.source.bytesFetched / 1048576).toFixed(1), size: p.source.size },
+    feed: p?.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, transcode: p.run.transcode },
   };
 };
 window.__watchSelectSub = n => selectSub(n, true);
