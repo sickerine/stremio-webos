@@ -47,6 +47,26 @@ LG TV ──(play/pause/seek/position)──► relay ──(WebSocket)──►
   styling and signs but not full CJK dialogue.
 - **Hi10P** (10-bit H.264, old fansubs): no hardware decode anywhere.
 
+
+## Deploy (Docker + Tailscale HTTPS)
+
+```sh
+docker compose up --build -d          # relay + app on :3211
+tailscale serve --bg --https=10443 3211
+```
+
+Open `https://<your-machine>.<tailnet>.ts.net:10443/?room=home`. HTTPS matters:
+WebCodecs (the Opus transcode for Dolby/DTS) needs a secure context, so a plain
+`http://LAN-IP` link plays anime (copy path) but not movie Dolby audio. The
+Tailscale HTTPS link makes every feature work for every viewer on the tailnet.
+
+Point the TV bridge at the relay:
+
+```js
+localStorage.setItem('watchPartyEnabled', '1');
+localStorage.setItem('watchPartyUrl', 'ws://YOUR_MACHINE_IP:3211/ws');
+```
+
 ## Run
 
 ```sh
