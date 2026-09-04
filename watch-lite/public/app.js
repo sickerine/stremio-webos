@@ -118,6 +118,7 @@ function connect() {
     if (message.type === "hello") { loadMedia(message.media); receiveState(message.state); }
     else if (message.type === "room-state") receiveState(message.state);
     else if (message.type === "media-state") loadMedia(message.media);
+    else if (message.type === "room-idle") { destroyPlayer(); loadedUrl = null; media = null; receiveState(null); }
   });
   socket.addEventListener("close", () => { setConnection("Reconnecting", "error"); setTimeout(connect, 1500); });
   socket.addEventListener("error", () => socket.close());
