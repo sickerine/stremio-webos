@@ -10,7 +10,7 @@ services:
       - "3210:3211"
       - "3211:3211"
     tmpfs:
-      - /data/media:size=4g
+      - /data/media:size=4g,uid=1000,gid=1000   # node user in node:alpine
     cpus: 2.0
     mem_limit: 1g
     healthcheck:
