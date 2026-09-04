@@ -89,7 +89,8 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
       const out = {};
       for (const [id, r] of rooms) {
         let tv = 0, viewers = 0; for (const c of r.clients) c.watchRole === "tv" ? tv++ : viewers++;
-        out[id] = { tv, viewers, cdnUrl: r.cdnUrl ? r.cdnUrl.replace(/token=[^&]+/, "token=REDACTED") : null, resolveError: r.resolveError, mediaHost: r.state?.mediaUrl ? new URL(r.state.mediaUrl).host : null, state: r.state && { ...r.state, mediaUrl: undefined } };
+        out[id] = { tv, viewers, cdnUrl: r.cdnUrl ? r.cdnUrl.replace(/token=[^&]+/, "token=REDACTED") : null, resolveError: r.resolveError, mediaHost: r.state?.mediaUrl ? new URL(r.state.mediaUrl).host : null, state: r.state && { ...r.state, mediaUrl: undefined },
+          ...(url.searchParams.has("samples") ? { samples: r.samples || [] } : {}) };   // raw TV samples: [sentAtMs, position, paused, sequence]
       }
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: true, rooms: out })); return;
     }
@@ -147,6 +148,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
       if (prev && prev.sessionId === next.sessionId && prev.sequence >= next.sequence) return;
       const newSession = !prev || prev.sessionId !== next.sessionId || prev.mediaUrl !== next.mediaUrl;
       room.state = next;
+      (room.samples ||= []).push([next.sentAtMs, next.positionSeconds, next.paused ? 1 : 0, next.sequence]); if (room.samples.length > 120) room.samples.shift();
       if (newSession) { room.cdnUrl = null; room.size = null; room.resolveError = null; broadcast(room, { type: "room-state", state: next, cdnUrl: null }); }
       else broadcast(room, { type: "room-state", state: next, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
 
