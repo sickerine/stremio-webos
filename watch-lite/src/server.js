@@ -59,6 +59,17 @@ export function createWatchLiteServer(options = {}) {
       response.end(JSON.stringify({ ok: true, service: "stremio-watch-lite" }));
       return;
     }
+    if (request.method === "GET" && url.pathname === "/status") {
+      const summary = {};
+      for (const [id, room] of rooms) {
+        let tv = 0, viewers = 0;
+        for (const c of room.clients) c.watchRole === "tv" ? tv++ : viewers++;
+        summary[id] = { tv, viewers, media: room.media, state: room.state && { ...room.state, mediaUrl: room.state.mediaUrl?.replace(/torbox\/[^/]+\//, "torbox/TOKEN/") } };
+      }
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ ok: true, rooms: summary }));
+      return;
+    }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
       serveFile(response, path.join(publicRoot, "index.html"), "text/html; charset=utf-8");
       return;
@@ -106,6 +117,7 @@ export function createWatchLiteServer(options = {}) {
 
   websocketServer.on("connection", (socket, identity) => {
     const room = roomFor(identity.roomId);
+    socket.watchRole = identity.role;
     room.clients.add(socket);
     send(socket, { type: "hello", role: identity.role, room: identity.roomId, state: room.state, media: room.media });
 
