@@ -13,6 +13,8 @@ const MAX_CACHED_CHUNKS = 24;          // ~96 MiB
 const PREFETCH_AHEAD = 2;              // keep streaming this many chunks past the highest one asked for
 const FOLLOW_WINDOW = 6;               // a read this far ahead of the stream waits for it instead of re-requesting
 const MAX_ATTEMPTS = 8;
+const LOG_KEEP = 200;                  // recent requests, for diagnosing CDN bans
+const backoff = attempt => new Promise(r => setTimeout(r, Math.min(30000, 600 * 2 ** attempt)));   // ~100s total; don't hammer a host that refuses us
 
 class Deferred {
   constructor() { this.settled = false; this.promise = new Promise((res, rej) => { this._res = res; this._rej = rej; }); }
@@ -33,7 +35,9 @@ export class ByteSource {
     this.requests = 0;
     this.retries = 0;
     this.stream = null;          // the one open sequential request: { next, wanted, deferreds, abort, wake }
+    this.log = [];               // [{t, k: size|stream|one, s: startByte, st: status|error, ms}]
   }
+  _log(k, s, st, t0) { this.log.push({ t: Date.now(), k, s, st: String(st).slice(0, 60), ms: Date.now() - t0 }); if (this.log.length > LOG_KEEP) this.log.shift(); }
 
   // The CDN's CORS policy doesn't expose Content-Range, but Content-Length is a
   // CORS-safelisted header, so we read the size from a HEAD (or an aborted GET).
@@ -54,7 +58,7 @@ export class ByteSource {
       const m = /\/(\d+)$/.exec(res.headers.get("content-range") || ""); await res.arrayBuffer().catch(() => {});
       return m ? Number(m[1]) : null;
     };
-    for (const f of [tryHead, tryGet, cr]) { try { const n = await f(); if (n) { this.size = n; return n; } } catch {} }
+    for (const f of [tryHead, tryGet, cr]) { const t0 = Date.now(); try { const n = await f(); this._log("size", 0, n ? "ok" : "no-size", t0); if (n) { this.size = n; return n; } } catch (e) { this._log("size", 0, e.message, t0); } }
     throw new Error("Could not determine file size from the CDN");
   }
 
@@ -106,9 +110,11 @@ export class ByteSource {
     while (live() && s.next * this.chunkSize < this.size) {
       await pause(); if (!live()) return;
       try {
-        const start = s.next * this.chunkSize;
-        const res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-` }, signal: s.abort.signal });
-        this.requests++;
+        const start = s.next * this.chunkSize, t0 = Date.now();
+        let res;
+        try { res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-` }, signal: s.abort.signal }); }
+        catch (e) { this._log("stream", start, e.message, t0); throw e; }
+        this.requests++; this._log("stream", start, res.status, t0);
         if (!(res.status === 206 || (res.status === 200 && start === 0))) throw new Error(`Range fetch failed: ${res.status}`);
         const reader = res.body.getReader();
         let buf = new Uint8Array(this.chunkSize), fill = 0;
@@ -141,7 +147,7 @@ export class ByteSource {
           for (const [, d] of s.deferreds) if (!d.settled) d.reject(lastError);
           return;
         }
-        await new Promise(r => setTimeout(r, Math.min(3000, 300 * 2 ** attempt)));
+        await backoff(attempt);
       }
     }
     if (live()) this.stream = null;
@@ -164,16 +170,19 @@ export class ByteSource {
     const start = index * this.chunkSize, end = Math.min(start + this.chunkSize, this.size) - 1;
     let lastError;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const t0 = Date.now();
       try {
-        const res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-${end}` } });
-        this.requests++;
+        let res;
+        try { res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-${end}` } }); }
+        catch (e) { this._log("one", start, e.message, t0); throw e; }
+        this.requests++; this._log("one", start, res.status, t0);
         if (!(res.status === 206 || res.status === 200)) throw new Error(`Range fetch failed: ${res.status}`);
         const bytes = new Uint8Array(await res.arrayBuffer());
         if (bytes.byteLength < end - start + 1) throw new Error(`short read: ${bytes.byteLength} of ${end - start + 1}`);
         this.bytesFetched += bytes.byteLength;
         this._teeMaybe(start, bytes);
         return bytes;
-      } catch (e) { lastError = e; this.retries++; await new Promise(r => setTimeout(r, Math.min(3000, 300 * 2 ** attempt))); }
+      } catch (e) { lastError = e; this.retries++; await backoff(attempt); }
     }
     throw lastError;
   }

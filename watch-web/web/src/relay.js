@@ -43,6 +43,7 @@ export function connectRelay({ room = "home", onState, onMedia, onIdle, onConnec
   return {
     close() { closed = true; clearTimeout(timer); stopPings(); try { socket?.close(); } catch {} },
     // relay timestamp -> local Date.now() ms; null until the first pong lands
+    send(obj) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj)); },
     toLocalMs: relayMs => (offset == null || !Number.isFinite(relayMs) ? null : relayMs + offset),
     clock: () => ({ offsetMs: offset, rttMs: rtt }),
   };
