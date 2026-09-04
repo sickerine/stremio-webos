@@ -176,7 +176,7 @@ export class Pipeline {
 
     for await (const p of vSink.packets(vKey)) {
       if (run.cancelled) break;
-      await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++; run.nv = nv; lastTs = p.timestamp;
+      await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++; run.nv = nv; lastTs = p.timestamp; run.fedTs = lastTs;
       // Keep audio a few seconds ahead of video: MSE's playable range is the
       // INTERSECTION of the track buffers, so audio must fully cover each video
       // fragment or the range fragments into gaps.

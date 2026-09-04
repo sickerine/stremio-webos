@@ -16,6 +16,8 @@ let audioUnlocked = false;
 let seeking = false;
 let lastRemuxAt = 0;
 const REMUX_COOLDOWN_MS = 5000;   // min gap between cold re-muxes while catching up
+const FEED_WAIT_S = 20;           // if the running mux is within this much media of the target, wait for it instead of restarting
+const JUMP_HOLD_MS = 1000;        // act on a TV jump only once a second sample confirms it (the TV blips to 0 on reload)
 
 const prefs = { audio: localStorage.getItem("watch.audio") || "", subs: localStorage.getItem("watch.subs") || "eng" };
 
@@ -138,6 +140,7 @@ async function selectSub(number, user) {
 async function follow() {
   const s = session; if (!s || !tvState || seeking) return;
   if (!s.pipeline.sourceBuffer) return;
+  if (Date.now() < tvState.holdUntil) return;          // a jump just arrived; wait for the next sample to confirm it
   const target = estimateTvPosition(tvState);
   if (tvState.paused) { if (!video.paused) video.pause(); }
   else if (video.paused && video.readyState >= 2) { video.play().catch(() => {}); }
@@ -148,10 +151,14 @@ async function follow() {
     // re-muxing from there, which clears the buffer; don't do that again until the
     // mux has had a few seconds to build toward the last target, or the browser will
     // restart forever while the TV keeps moving ahead of a cold buffer.
+    const run = s.pipeline.run;
+    const feedIsClose = run && !run.cancelled && run.fedTs != null && target >= run.startAt && target - run.fedTs < FEED_WAIT_S;
     if (s.pipeline.isBuffered(target)) {
       seeking = true;
       try { await s.pipeline.seekTo(target); } finally { seeking = false; }
       video.playbackRate = 1;
+    } else if (feedIsClose) {
+      video.playbackRate = 1;                          // the running mux reaches the target in a moment; restarting would only add a cold start
     } else if (Date.now() - lastRemuxAt > REMUX_COOLDOWN_MS) {
       lastRemuxAt = Date.now();
       seeking = true;
@@ -198,8 +205,10 @@ const relay = connectRelay({
     // The relay stamps each sample on arrival (sentAtMs, relay clock). With the clock
     // synced, read that in local time so transit latency drops out of the estimate.
     const sampledAt = relay.toLocalMs(state.sentAtMs) ?? now;
-    const snapUntil = tvJumped(tvState, state, now) ? now + SNAP_WINDOW_MS : (tvState?.snapUntil || 0);
-    tvState = { ...state, receivedAtMs: sampledAt, snapUntil };
+    const jumped = tvJumped(tvState, state, now);
+    const snapUntil = jumped ? now + SNAP_WINDOW_MS : (tvState?.snapUntil || 0);
+    const holdUntil = jumped ? now + JUMP_HOLD_MS : (tvState?.holdUntil || 0);
+    tvState = { ...state, receivedAtMs: sampledAt, snapUntil, holdUntil };
     ui.setTitle(titleFor(state));
     ui.setTv(state.paused ? "Paused on the TV" : "In sync", state.paused ? "warn" : "ok");
     if (!session) {
