@@ -90,10 +90,11 @@ export class Pipeline {
     const writable = new WritableStream({ write: chunk => this._append(chunk) });
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: "fragmented", minimumFragmentDuration: 1 }), target: new AppendOnlyStreamTarget(writable) });
     run.output = output;
+    // (no track metadata: MSE ignores it and mediabunny insists on ISO 639-2 codes)
     const vSrc = new EncodedVideoPacketSource(this.tracks.video.codec);
-    output.addVideoTrack(vSrc, { languageCode: this.tracks.video.track.languageCode });
+    output.addVideoTrack(vSrc);
     let aSrc = null;
-    if (audio) { aSrc = new EncodedAudioPacketSource(audio.codec); output.addAudioTrack(aSrc, { languageCode: audio.language }); }
+    if (audio) { aSrc = new EncodedAudioPacketSource(audio.codec); output.addAudioTrack(aSrc); }
     await output.start();
 
     this.onStatus?.({ phase: "muxing", startAt });

@@ -84,8 +84,11 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST 
       const file = path.join(distRoot, p);
       if (file.startsWith(distRoot) && existsSync(file) && statSync(file).isFile()) {
         const ext = path.extname(file);
+        // Optional cross-origin isolation (ISOLATE=1) so jassub can use SharedArrayBuffer
+        // threads. CDN fetches are CORS responses, so they stay allowed under COEP.
+        const iso = process.env.ISOLATE === "1" ? { "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp" } : {};
         res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream",
-          "cache-control": p === "/index.html" ? "no-store" : "public, max-age=31536000, immutable" });
+          "cache-control": p === "/index.html" ? "no-store" : "public, max-age=31536000, immutable", ...iso });
         createReadStream(file).pipe(res); return;
       }
     }

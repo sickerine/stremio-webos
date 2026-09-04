@@ -11,6 +11,7 @@ const ICONS = {
 
 export function buildUi(root) {
   root.innerHTML = `
+    <div class="stage">
     <media-controller autohide="2" nohotkeys="false" keyboardforwardseekoffset="0" keyboardbackwardseekoffset="0">
       <video slot="media" playsinline crossorigin="anonymous"></video>
       <div class="hud" slot="top-chrome">
@@ -33,11 +34,15 @@ export function buildUi(root) {
         <media-pip-button></media-pip-button>
         <media-fullscreen-button></media-fullscreen-button>
       </media-control-bar>
-    </media-controller>`;
+    </media-controller>
+    <!-- libass overlay: a plain sibling of media-controller, so it is never subject
+         to the player's shadow-DOM slot layout (which sized jassub's canvas to 0). -->
+    <div class="ass-layer" data-ass-layer></div>
+    </div>`;
 
   const q = s => root.querySelector(s);
   const el = {
-    controller: q("media-controller"), video: q("video"), conn: q("[data-conn]"), tv: q("[data-tv]"), title: q("[data-title]"), stats: q("[data-stats]"),
+    controller: q("media-controller"), video: q("video"), assLayer: q("[data-ass-layer]"), conn: q("[data-conn]"), tv: q("[data-tv]"), title: q("[data-title]"), stats: q("[data-stats]"),
     overlay: q("[data-overlay]"), ovTitle: q("[data-ov-title]"), ovBody: q("[data-ov-body]"), sound: q("[data-sound]"),
     audioBtn: q("[data-audio-btn]"), audioMenu: q("[data-audio-menu]"), subsBtn: q("[data-subs-btn]"), subsMenu: q("[data-subs-menu]"),
   };

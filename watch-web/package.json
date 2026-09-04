@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "assets": "rm -rf web/public/jassub && mkdir -p web/public && cp -R node_modules/jassub/dist web/public/jassub && cp node_modules/matroska-subtitles/dist/matroska-subtitles.min.js web/public/",
+    "assets": "mkdir -p web/public && cp node_modules/matroska-subtitles/dist/matroska-subtitles.min.js web/public/",
     "dev": "npm run assets && vite",
     "build": "npm run assets && vite build",
     "start": "node server/server.js",
@@ -25,6 +25,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "playwright": "^1.62.1",
     "vite": "^8.2.2"
   }
 }
