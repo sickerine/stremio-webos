@@ -1,0 +1,21 @@
+name: stremio-watch-web
+
+services:
+  watch-web:
+    build: .
+    container_name: stremio-watch-web
+    init: true
+    ports:
+      - "3211:3211"   # the TV bridge already targets this port; browsers use it too
+    environment:
+      # ISOLATE=1 adds COOP/COEP so jassub can use multithreaded libass. CDN fetches
+      # are CORS requests, so they keep working under COEP.
+      ISOLATE: ${ISOLATE:-0}
+    cpus: 0.5
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3211/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
