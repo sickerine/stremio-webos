@@ -19,6 +19,7 @@
     var sessionId = null;
     var sourceRevision = 0;
     var sequence = 0;
+    var wasSettling = false;
     var reconnectTimer = 0;
     var idleTimer = 0;
     var idleGeneration = 0;
@@ -151,8 +152,13 @@
         }
         cancelIdle();
         updateSource(nextUrl);
+        // After a seek the ASS clock is frozen until webOS currentTime stops bouncing;
+        // the moment it re-locks, send the accurate position so viewers land on it.
+        var settling = Boolean(controller && controller._seeking);
+        if (wasSettling && !settling) publish();
+        wasSettling = settling;
         var now = Date.now();
-        if (sessionId && now - lastHeartbeat >= 1000) {
+        if (sessionId && now - lastHeartbeat >= 500) {
             lastHeartbeat = now;
             publish();
         }

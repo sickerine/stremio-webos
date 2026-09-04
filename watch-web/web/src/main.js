@@ -3,7 +3,7 @@ import { connectRelay } from "./relay.js";
 import { Pipeline } from "./player/pipeline.js";
 import { SubtitleDemux, AssRenderer } from "./subtitles/ass.js";
 import { TextSubtitles } from "./subtitles/text.js";
-import { estimateTvPosition, syncAction } from "./sync.js";
+import { estimateTvPosition, syncAction, tvJumped, SNAP_WINDOW_MS } from "./sync.js";
 
 const room = new URLSearchParams(location.search).get("room") || "home";
 const ui = buildUi(document.getElementById("app"));
@@ -142,7 +142,7 @@ async function follow() {
   if (tvState.paused) { if (!video.paused) video.pause(); }
   else if (video.paused && video.readyState >= 2) { video.play().catch(() => {}); }
 
-  const act = syncAction(video.currentTime, target);
+  const act = syncAction(video.currentTime, target, { paused: tvState.paused, snap: Date.now() < tvState.snapUntil });
   if (act.type === "seek") {
     // If the target is already buffered, jump instantly. Otherwise a hard seek means
     // re-muxing from there, which clears the buffer; don't do that again until the
@@ -180,7 +180,9 @@ connectRelay({
   room,
   onConnection: st => ui.setConnection(st),
   onState: (state, resolveError, resolveHost) => {
-    tvState = { ...state, receivedAtMs: Date.now() };
+    const now = Date.now();
+    const snapUntil = tvJumped(tvState, state, now) ? now + SNAP_WINDOW_MS : (tvState?.snapUntil || 0);
+    tvState = { ...state, receivedAtMs: now, snapUntil };
     ui.setTitle(titleFor(state));
     ui.setTv(state.paused ? "Paused on the TV" : "In sync", state.paused ? "warn" : "ok");
     if (!session) {
