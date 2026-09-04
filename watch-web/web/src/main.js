@@ -187,6 +187,7 @@ video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.
 
 const relay = connectRelay({
   room,
+  build: new URL(import.meta.url).pathname,   // "/assets/index-<hash>.js": changes with every build
   onConnection: st => ui.setConnection(st),
   onState: (state, resolveError, resolveHost) => {
     const now = Date.now();
