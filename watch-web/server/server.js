@@ -2,7 +2,7 @@
 // No media touches this process. Browsers fetch the stream from the CDN themselves.
 import http from "node:http";
 import https from "node:https";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
@@ -66,6 +66,10 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
   const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null }); return rooms.get(id); };
   const send = (s, m) => { if (s.readyState === WebSocket.OPEN) s.send(JSON.stringify(m)); };
   const broadcast = (room, m) => { for (const c of room.clients) send(c, m); };
+  // The hashed bundle path in dist/index.html identifies this build. It rides on
+  // `hello`, so a tab left open across a deploy reloads instead of running old code.
+  let build = null;
+  try { build = /\/assets\/index-[\w-]+\.js/.exec(readFileSync(path.join(distRoot, "index.html"), "utf8"))?.[0] ?? null; } catch {}
   const goIdle = room => { room.state = null; room.cdnUrl = null; room.size = null; room.resolving = null; room.resolveError = null; broadcast(room, { type: "room-idle" }); };
 
   // The TV heartbeats every 500ms while it has media. If a room's last sample is
@@ -122,7 +126,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
     const room = roomFor(roomId);
     socket.watchRole = role;
     room.clients.add(socket);
-    send(socket, { type: "hello", role, room: roomId, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
+    send(socket, { type: "hello", role, room: roomId, build, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
     socket.on("close", () => room.clients.delete(socket));
     socket.on("message", async data => {
       let msg; try { msg = JSON.parse(data.toString()); } catch { return send(socket, { type: "error", code: "invalid-json" }); }

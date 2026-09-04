@@ -4,7 +4,7 @@
 import { bestOffset } from "./sync.js";
 const PING_BURST = 6, PING_BURST_GAP_MS = 250, PING_EVERY_MS = 10000, PING_KEEP = 8;
 
-export function connectRelay({ room = "home", onState, onMedia, onIdle, onConnection, onResolveError }) {
+export function connectRelay({ room = "home", build = null, onState, onMedia, onIdle, onConnection, onResolveError }) {
   let socket = null, timer = null, closed = false;
   let pings = [], pingTimer = null, offset = null, rtt = null;
   const ping = () => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "ping", t: Date.now() })); };
@@ -31,6 +31,7 @@ export function connectRelay({ room = "home", onState, onMedia, onIdle, onConnec
         offset = bestOffset(pings); rtt = Math.min(...pings.map(p => p.rtt));
         return;
       }
+      if (m.type === "hello" && build && m.build && m.build !== build) { location.reload(); return; }   // deployed while this tab was open
       if (m.type === "hello") { if (m.state) { onState?.(m.state, m.resolveError, m.resolveHost); if (m.cdnUrl) onMedia?.(m.cdnUrl, m.state.sessionId, { size: m.size }); } else onIdle?.(); }
       else if (m.type === "room-state") { onState?.(m.state, m.resolveError, m.resolveHost); if (m.cdnUrl) onMedia?.(m.cdnUrl, m.state.sessionId, { size: m.size }); }
       else if (m.type === "room-media") { if (m.cdnUrl) onMedia?.(m.cdnUrl, m.sessionId, { size: m.size }); else onResolveError?.(m.resolveError, m.attempt, m.resolveHost); }
