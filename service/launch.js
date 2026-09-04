@@ -19,6 +19,28 @@ var service = new Service('io.stremio.patched.server');
 var ready = false;
 var pendingMessages = [];
 
+// Reap any older instance of this service before we bind anything. A relaunch used
+// to leave the previous streaming server alive (it holds :8081/:11470); the new one
+// then died on EADDRINUSE and Luna respawned it in a loop, and the two servers briefly
+// doubled memory use, which is what tipped the TV into swap-thrash. We run as the same
+// uid as the old instance, so SIGKILL is permitted (an SSH login is a different uid and
+// cannot). Matches by cmdline, skips our own pid.
+function reapOldInstances() {
+    var killed = [];
+    try {
+        fs.readdirSync('/proc').forEach(function (pid) {
+            if (!/^\d+$/.test(pid) || +pid === process.pid) return;
+            var cmd;
+            try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8'); } catch (e) { return; }
+            if (cmd.indexOf('io.stremio.patched.server') === -1) return;
+            try { process.kill(+pid, 'SIGKILL'); killed.push(pid); } catch (e) {}
+        });
+    } catch (e) {}
+    if (killed.length) { try { console.log('[launch] reaped old service pids: ' + killed.join(',')); } catch (e) {} }
+    return killed.length;
+}
+reapOldInstances();
+
 // Keep the service alive indefinitely
 service.activityManager.create('keepAlive', function() {});
 
@@ -287,7 +309,7 @@ function warmFromBody(body) {
 }
 
 // Single server: static files first, then proxy to streaming server
-http.createServer(function(req, res) {
+var proxyServer = http.createServer(function(req, res) {
     var urlPath = req.url.split('?')[0];
     // In-process AniList "currently airing" catalog addon (served to Stremio
     // as http://127.0.0.1:8081/anime-airing/...). CORS + JSON per addon spec.
@@ -611,12 +633,24 @@ http.createServer(function(req, res) {
         });
     }
     serveStatic(urlPath, res, function() { proxyToStreaming(req, res); });
-}).listen(8081, function() {
+});
+function onProxyReady() {
     ready = true;
     // Respond to any start calls that arrived before the server was ready
     pendingMessages.forEach(function(msg) { msg.respond({ ready: true }); });
     pendingMessages = [];
+}
+// If a stale instance still holds :8081 (reap raced a fresh spawn), kill it and retry
+// instead of crashing the process, which is what caused the respawn loop.
+var proxyBindTries = 0;
+proxyServer.on('error', function(e) {
+    if (e && e.code === 'EADDRINUSE' && proxyBindTries < 10) {
+        proxyBindTries++;
+        reapOldInstances();
+        setTimeout(function() { try { proxyServer.listen(8081, onProxyReady); } catch (x) {} }, 500);
+    } else { try { console.error('[launch] proxy listen error: ' + (e && e.message)); } catch (x) {} }
 });
+proxyServer.listen(8081, onProxyReady);
 
 // Point the streaming server at the bundled ffmpeg binaries.
 // HLS remux/transcode requires ffmpeg+ffprobe; without these the streaming
