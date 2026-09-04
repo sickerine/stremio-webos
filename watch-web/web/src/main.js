@@ -29,6 +29,28 @@ const CODEC_NAMES = { aac: "AAC", ac3: "Dolby", eac3: "Dolby", dts: "DTS", flac:
 function codecName(c) { return CODEC_NAMES[c] || String(c || "").toUpperCase(); }
 function fmtLang(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch { return code || "und"; } }
 
+// The TV bridge sends document.title ("Stremio") when the item has no series id (movies).
+// Derive a readable title from the release filename instead.
+function titleFor(state) {
+  const raw = (state.title || "").trim();
+  if (raw && !/^stremio$/i.test(raw)) return raw;
+  try {
+    const seg = decodeURIComponent(new URL(state.mediaUrl).pathname.split("/").filter(Boolean).pop() || "");
+    const stem = seg.replace(/\.[a-z0-9]{2,4}$/i, "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
+    const m = stem.match(/^(.*?)(?:\s|\(|\[)?(19|20)\d{2}\b/);
+    let name = (m ? m[1] : stem.split(/\s(?=\d{3,4}p\b|2160p|1080p|720p|blu-?ray|web-?dl|webrip|hdtv|uhd|remux|x26[45]|h\.?26[45]|hevc|hdr|dv\b)/i)[0]).trim();
+    const year = m ? stem.slice(m.index + m[1].length).match(/(19|20)\d{2}/)?.[0] : null;
+    name = name.replace(/^\[[^\]]*\]\s*/, "").replace(/\b\w/g, c => c.toUpperCase());
+    return name ? (year ? `${name} (${year})` : name) : raw || "Now playing";
+  } catch { return raw || "Now playing"; }
+}
+
+// Name the hop that failed so a TorBox node outage reads as what it is.
+function unreachableText(host, attempt) {
+  const who = /tb-cdn|torbox/i.test(host || "") ? "TorBox's server for this file" : host ? host : "the stream host";
+  return `Can't reach ${who} right now. Retrying${attempt > 1 ? ` (${attempt})` : ""}.`;
+}
+
 function showIdle() {
   ui.setStage(null);
   ui.overlay(true, "Waiting for the TV", "When the TV plays something, it appears here and stays in sync.");
@@ -157,11 +179,14 @@ video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.
 connectRelay({
   room,
   onConnection: st => ui.setConnection(st),
-  onState: state => {
+  onState: (state, resolveError, resolveHost) => {
     tvState = { ...state, receivedAtMs: Date.now() };
-    ui.setTitle(state.title || state.episodeId || "");
+    ui.setTitle(titleFor(state));
     ui.setTv(state.paused ? "Paused on the TV" : "In sync", state.paused ? "warn" : "ok");
-    if (!session) { ui.setStage("resolve"); ui.overlay(true, state.title || "Locating the stream", "The TV just started something."); }
+    if (!session) {
+      ui.setStage("resolve");
+      ui.overlay(true, titleFor(state), resolveError ? unreachableText(resolveHost) : "The TV just started something.");
+    }
     if (session && session.id !== state.sessionId) { void endSession(); ui.overlay(true, "Switching stream", "The TV changed what it's playing."); }
   },
   onMedia: (cdnUrl, sessionId, { size, resolveError } = {}) => {
@@ -169,6 +194,11 @@ connectRelay({
     if (!session || session.id !== sessionId) void startSession(sessionId, cdnUrl, size);
   },
   onIdle: () => { void endSession(); tvState = null; showIdle(); },
+  onResolveError: (message, attempt, host) => {
+    if (session) return;
+    ui.setStage("resolve");
+    ui.overlay(true, tvState ? titleFor(tvState) : "Locating the stream", unreachableText(host, attempt));
+  },
 });
 ui.setRoom(room === "home" ? "" : `Room ${room}`);
 showIdle();

@@ -26,7 +26,7 @@ export function buildUi(root) {
         </div>
       </div>
       <div class="overlay" slot="centered-chrome" data-overlay>
-        <div class="brand"><span class="brand-mark">${ICONS.play}</span>Stremio Watch</div>
+        <div class="brand"><span class="brand-mark">${ICONS.play}</span></div>
         <div class="center">
           <h1 data-ov-title>Waiting for the TV</h1>
           <p class="lead" data-ov-body>When the TV plays something, it appears here and stays in sync.</p>

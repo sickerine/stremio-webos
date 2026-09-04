@@ -36,7 +36,10 @@ export function resolveRedirects(url, { fetchHead = headRequest, maxHops = 6 } =
   return (async () => {
     let current = url;
     for (let i = 0; i < maxHops; i++) {
-      const { status, location, size } = await fetchHead(current);
+      let hop;
+      try { hop = await fetchHead(current); }
+      catch (e) { const err = new Error(`${new URL(current).host}: ${e.message}`); err.host = new URL(current).host; throw err; }
+      const { status, location, size } = hop;
       if (status >= 300 && status < 400 && location) { current = new URL(location, current).href; continue; }
       return { url: current, size: size ?? null };
     }
@@ -60,7 +63,7 @@ function headRequest(url) {
 
 export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST } = {}) {
   const rooms = new Map();
-  const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null }); return rooms.get(id); };
+  const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null }); return rooms.get(id); };
   const send = (s, m) => { if (s.readyState === WebSocket.OPEN) s.send(JSON.stringify(m)); };
   const broadcast = (room, m) => { for (const c of room.clients) send(c, m); };
 
@@ -73,7 +76,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST 
       const out = {};
       for (const [id, r] of rooms) {
         let tv = 0, viewers = 0; for (const c of r.clients) c.watchRole === "tv" ? tv++ : viewers++;
-        out[id] = { tv, viewers, cdnUrl: r.cdnUrl ? r.cdnUrl.replace(/token=[^&]+/, "token=REDACTED") : null, state: r.state && { ...r.state, mediaUrl: undefined } };
+        out[id] = { tv, viewers, cdnUrl: r.cdnUrl ? r.cdnUrl.replace(/token=[^&]+/, "token=REDACTED") : null, resolveError: r.resolveError, mediaHost: r.state?.mediaUrl ? new URL(r.state.mediaUrl).host : null, state: r.state && { ...r.state, mediaUrl: undefined } };
       }
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: true, rooms: out })); return;
     }
@@ -110,7 +113,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST 
     const room = roomFor(roomId);
     socket.watchRole = role;
     room.clients.add(socket);
-    send(socket, { type: "hello", role, room: roomId, state: room.state, cdnUrl: room.cdnUrl, size: room.size });
+    send(socket, { type: "hello", role, room: roomId, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
     socket.on("close", () => room.clients.delete(socket));
     socket.on("message", async data => {
       let msg; try { msg = JSON.parse(data.toString()); } catch { return send(socket, { type: "error", code: "invalid-json" }); }
@@ -130,22 +133,39 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST 
       if (prev && prev.sessionId === next.sessionId && prev.sequence >= next.sequence) return;
       const newSession = !prev || prev.sessionId !== next.sessionId || prev.mediaUrl !== next.mediaUrl;
       room.state = next;
-      if (newSession) { room.cdnUrl = null; room.size = null; broadcast(room, { type: "room-state", state: next, cdnUrl: null }); }
-      else broadcast(room, { type: "room-state", state: next, cdnUrl: room.cdnUrl, size: room.size });
+      if (newSession) { room.cdnUrl = null; room.size = null; room.resolveError = null; broadcast(room, { type: "room-state", state: next, cdnUrl: null }); }
+      else broadcast(room, { type: "room-state", state: next, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
 
-      if (newSession && next.mediaUrl) {
-        const sessionId = next.sessionId;
-        room.resolving = resolve(next.mediaUrl).then(({ url, size }) => {
-          if (room.state?.sessionId !== sessionId) return;
-          room.cdnUrl = url; room.size = size;
-          broadcast(room, { type: "room-media", sessionId, cdnUrl: url, size });
-        }).catch(error => {
-          if (room.state?.sessionId !== sessionId) return;
-          broadcast(room, { type: "room-media", sessionId, cdnUrl: next.mediaUrl, size: null, resolveError: error.message });
-        });
-      }
+      if (newSession && next.mediaUrl) startResolve(room, next);
     });
   });
+
+  // Resolve with retries: TorBox/torrentio hiccup for a minute fairly often, and the
+  // TV keeps playing meanwhile. Keep trying (backing off to 15s) while this session
+  // is still the room's current one; viewers see the error text in the meantime.
+  function startResolve(room, state) {
+    const sessionId = state.sessionId;
+    const current = () => room.state?.sessionId === sessionId && room.state?.mediaUrl === state.mediaUrl;
+    let attempt = 0;
+    const tick = async () => {
+      if (!current()) return;
+      attempt++;
+      try {
+        const { url, size } = await resolve(state.mediaUrl);
+        if (!current()) return;
+        room.cdnUrl = url; room.size = size; room.resolveError = null;
+        console.log(`[relay] resolved ${sessionId} -> ${new URL(url).host} (attempt ${attempt})`);
+        broadcast(room, { type: "room-media", sessionId, cdnUrl: url, size });
+      } catch (error) {
+        if (!current()) return;
+        room.resolveError = error.message; room.resolveHost = error.host || null;
+        console.error(`[relay] resolve failed for ${sessionId} (attempt ${attempt}): ${error.message}`);
+        broadcast(room, { type: "room-media", sessionId, cdnUrl: null, size: null, resolveError: error.message, resolveHost: error.host || null, attempt });
+        setTimeout(tick, Math.min(15000, 2000 * attempt));
+      }
+    };
+    room.resolving = tick();
+  }
 
   return {
     address: () => httpServer.address(),
