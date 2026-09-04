@@ -30,10 +30,11 @@ class FakeFrameDocument {
     this.documentElement = new FakeElement();
     this.listeners = new Map();
     this.video = null;
+    this.nodes = new Map();
   }
   getElementById(id) { return this.head.children.find(child => child.id === id) || null; }
   createElement() { return new FakeElement(); }
-  querySelector(selector) { return selector === "video" ? this.video : null; }
+  querySelector(selector) { return selector === "video" ? this.video : this.nodes.get(selector) || null; }
   addEventListener(name, listener) {
     const listeners = this.listeners.get(name) || [];
     listeners.push(listener);
@@ -45,6 +46,16 @@ class FakeFrameDocument {
       if (event.immediatePropagationStopped) break;
     }
   }
+}
+
+class FakeWorker {
+  static instances = [];
+  constructor() {
+    this.listeners = new Map();
+    FakeWorker.instances.push(this);
+  }
+  addEventListener(name, listener) { this.listeners.set(name, listener); }
+  message(data) { this.listeners.get("message")?.({ data }); }
 }
 
 class FakeSocket {
@@ -60,8 +71,9 @@ class FakeSocket {
   close() { this.emit("close"); }
 }
 
-function setup({ bootstrapPromise } = {}) {
+function setup({ bootstrapPromise, subtitleIndex = null, subtitleCodec = null, withWorker = false } = {}) {
   FakeSocket.instances = [];
+  FakeWorker.instances = [];
   const elements = {
     waiting: new FakeElement(),
     player: new FakeElement(),
@@ -80,6 +92,7 @@ function setup({ bootstrapPromise } = {}) {
         location: { hash: "#/home" },
         document: new FakeFrameDocument(),
       };
+      if (withWorker) frame.contentWindow.Worker = FakeWorker;
       frames.push(frame);
       return frame;
     },
@@ -92,12 +105,22 @@ function setup({ bootstrapPromise } = {}) {
     serverId: "server-id", userId: "user-id", accessToken: "token",
     user: { Id: "user-id", Name: "watchparty" },
   };
+  const sessions = [{
+    DeviceId: "viewer-device-123",
+    PlayState: { SubtitleStreamIndex: subtitleIndex },
+    NowPlayingItem: {
+      MediaStreams: subtitleIndex === null ? [] : [{ Type: "Subtitle", Index: subtitleIndex, Codec: subtitleCodec }],
+    },
+  }];
   const controller = createPassiveViewer({
     document,
     location: { origin: "http://watch.test", protocol: "http:", host: "watch.test" },
     storage,
     WebSocketImplementation: FakeSocket,
-    fetchImplementation: async () => ({ ok: true, json: async () => bootstrapPromise ? bootstrapPromise : bootstrap }),
+    fetchImplementation: async pathname => ({
+      ok: true,
+      json: async () => pathname === "/Sessions" ? sessions : bootstrapPromise ? bootstrapPromise : bootstrap,
+    }),
     setIntervalImplementation: callback => { intervals.push(callback); return intervals.length; },
     clearIntervalImplementation: () => {},
     setTimeoutImplementation: callback => { timeouts.push(callback); return timeouts.length; },
@@ -140,7 +163,12 @@ test("a fresh viewer needs no login and reveals only active TV video", async () 
   assert.equal(elements.waiting.hidden, false);
   assert.equal(elements.player.hidden, false, "the covered iframe stays active for Jellyfin remote control");
 
-  frames[0].contentWindow.document.querySelector = selector => selector === "video" ? { readyState: 4 } : null;
+  frames[0].contentWindow.document.querySelector = selector => selector === "video"
+    ? { readyState: 4, currentTime: 20 }
+    : null;
+  intervals[0]();
+  assert.equal(elements.waiting.hidden, false, "the first decodable frame alone is not enough");
+  await new Promise(resolve => setImmediate(resolve));
   intervals[0]();
   assert.equal(elements.waiting.hidden, true);
   assert.equal(elements.player.hidden, false);
@@ -204,7 +232,7 @@ test("blocked audible autoplay falls back to video with a one-action sound promp
 
   let playCalls = 0;
   const video = {
-    readyState: 4,
+    readyState: 4, currentTime: 20,
     paused: true,
     muted: false,
     play() {
@@ -217,6 +245,7 @@ test("blocked audible autoplay falls back to video with a one-action sound promp
   frames[0].contentWindow.document.querySelector = selector => selector === "video" ? video : null;
   intervals[0]();
   await new Promise(resolve => setImmediate(resolve));
+  intervals[0]();
 
   assert.equal(playCalls, 2);
   assert.equal(video.muted, true);
@@ -243,7 +272,7 @@ test("a viewer joining while the TV is paused does not start playback", async ()
   assert.equal(playCalls, 0);
 });
 
-test("a paused or buffering video reveals Jellyfin controls immediately", async () => {
+test("a paused or buffering video stays covered until its first frame is ready", async () => {
   const { elements, frames, intervals } = setup();
   const socket = FakeSocket.instances[0];
   socket.message({ type: "viewer-state", mode: "playing", sessionId: "episode-1", paused: true });
@@ -251,7 +280,7 @@ test("a paused or buffering video reveals Jellyfin controls immediately", async 
   await Promise.resolve();
 
   frames[0].contentWindow.document.video = {
-    readyState: 1,
+    readyState: 1, currentTime: 20,
     paused: true,
     muted: false,
     pause() { this.paused = true; },
@@ -259,8 +288,50 @@ test("a paused or buffering video reveals Jellyfin controls immediately", async 
   };
   intervals[0]();
 
-  assert.equal(elements.waiting.hidden, true);
+  assert.equal(elements.waiting.hidden, false);
   assert.equal(elements.player.hidden, false);
+
+  frames[0].contentWindow.document.video.readyState = 4;
+  intervals[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  intervals[0]();
+  assert.equal(elements.waiting.hidden, true);
+});
+
+test("an ASS stream stays covered until both the TV frame and subtitle worker are ready", async () => {
+  const { elements, frames, intervals } = setup({
+    subtitleIndex: 2,
+    subtitleCodec: "ass",
+    withWorker: true,
+  });
+  const socket = FakeSocket.instances[0];
+  socket.message({
+    type: "viewer-state", mode: "playing", sessionId: "episode-1",
+    paused: true, positionSeconds: 20,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  let frameCallback;
+  const frameDocument = frames[0].contentWindow.document;
+  frameDocument.video = {
+    readyState: 4, currentTime: 20, paused: true,
+    requestVideoFrameCallback(callback) { frameCallback = callback; },
+  };
+  intervals[0]();
+  const subtitleWorker = new frames[0].contentWindow.Worker("subtitle-worker.js");
+  frameDocument.nodes.set(".libassjs-canvas", new FakeElement());
+
+  frameCallback(0, { mediaTime: 20 });
+  intervals[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  intervals[0]();
+  assert.equal(elements.waiting.hidden, false);
+  assert.equal(elements["status-title"].textContent, "Loading subtitles");
+
+  subtitleWorker.message({ target: "ready" });
+  intervals[0]();
+  assert.equal(elements.waiting.hidden, true);
 });
 
 test("TV heartbeats correct browser drift and apply pause locally", async () => {

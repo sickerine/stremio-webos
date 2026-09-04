@@ -56,6 +56,7 @@ export function createPassiveViewer(options = {}) {
   let frame = null;
   let frameMonitor = null;
   let frameBootstrap = null;
+  let viewerAccessToken = "";
   let activeSessionId = null;
   let activeSessionHasPlayed = false;
   let tvPaused = true;
@@ -66,6 +67,13 @@ export function createPassiveViewer(options = {}) {
   let socket = null;
   let reconnectTimer = null;
   let coldPausedHideTimer = null;
+  let frameProbe = null;
+  let presentedFrame = null;
+  let subtitleSelection = null;
+  let subtitleSelectionRequest = null;
+  let subtitleSelectionRetryAtMs = 0;
+  let assReadySessionId = null;
+  let pgsReadySessionId = null;
   let stopped = false;
   const mediaGuards = new WeakMap();
   const viewerDeviceId = storage.getItem("stremio-watch-device-id") || createDeviceId();
@@ -95,6 +103,7 @@ export function createPassiveViewer(options = {}) {
   function showWaiting(title = "Waiting for the TV", body = "Playback will appear here automatically.") {
     activeSessionId = null;
     activeSessionHasPlayed = false;
+    resetPlaybackReadiness();
     tvPositionSeconds = null;
     autoplayAttempt = null;
     if (coldPausedHideTimer) clearTimeoutImplementation(coldPausedHideTimer);
@@ -104,6 +113,16 @@ export function createPassiveViewer(options = {}) {
     soundPrompt.hidden = true;
     player.hidden = true;
     setStatus(title, body);
+  }
+
+  function resetPlaybackReadiness() {
+    frameProbe = null;
+    presentedFrame = null;
+    subtitleSelection = null;
+    subtitleSelectionRequest = null;
+    subtitleSelectionRetryAtMs = 0;
+    assReadySessionId = null;
+    pgsReadySessionId = null;
   }
 
   function writeJellyfinSession(session) {
@@ -263,6 +282,117 @@ export function createPassiveViewer(options = {}) {
     protectVideo(video);
   }
 
+  function observeSubtitleWorkers(frameWindow) {
+    if (!frameWindow?.Worker || frameWindow.__stremioWatchObservesSubtitleWorkers) return;
+    const NativeWorker = frameWindow.Worker;
+    function ObservedWorker(...args) {
+      const sessionId = activeSessionId;
+      const worker = new NativeWorker(...args);
+      worker.addEventListener?.("message", event => {
+        if (!sessionId || activeSessionId !== sessionId) return;
+        if (event.data?.target === "ready") assReadySessionId = sessionId;
+        if (event.data?.op === "updateTimestamps") pgsReadySessionId = sessionId;
+      });
+      return worker;
+    }
+    ObservedWorker.prototype = NativeWorker.prototype;
+    Object.setPrototypeOf(ObservedWorker, NativeWorker);
+    frameWindow.Worker = ObservedWorker;
+    frameWindow.__stremioWatchObservesSubtitleWorkers = true;
+  }
+
+  function tvTargetPosition() {
+    if (!Number.isFinite(tvPositionSeconds)) return null;
+    const elapsedSeconds = tvPaused ? 0 : Math.max(0, now() - tvPositionReceivedAtMs) / 1_000;
+    return tvPositionSeconds + elapsedSeconds;
+  }
+
+  function matchesTvPosition(positionSeconds) {
+    const target = tvTargetPosition();
+    return Number.isFinite(positionSeconds) && (target === null || Math.abs(positionSeconds - target) < 1.5);
+  }
+
+  function observePresentedFrame(video) {
+    if (!activeSessionId || !video) return;
+    const sessionId = activeSessionId;
+    const source = video.currentSrc || video.src || "";
+    const sameProbe = frameProbe?.sessionId === sessionId
+      && frameProbe.video === video
+      && (!source || frameProbe.source === source);
+    if (!sameProbe && frameProbe?.sessionId === sessionId) {
+      presentedFrame = null;
+      assReadySessionId = null;
+      pgsReadySessionId = null;
+    }
+    if (typeof video.requestVideoFrameCallback !== "function") {
+      if (!sameProbe) frameProbe = { sessionId, video, source };
+      if (video.readyState >= 2 && matchesTvPosition(video.currentTime)) {
+        presentedFrame = { sessionId, video, mediaTime: video.currentTime };
+      }
+      return;
+    }
+    if (sameProbe) return;
+    const probe = { sessionId, video, source };
+    frameProbe = probe;
+    const capture = (_time, metadata) => {
+      if (activeSessionId !== sessionId || currentVideo() !== video || frameProbe !== probe) return;
+      if (matchesTvPosition(metadata.mediaTime)) {
+        presentedFrame = { sessionId, video, mediaTime: metadata.mediaTime };
+        return;
+      }
+      video.requestVideoFrameCallback(capture);
+    };
+    video.requestVideoFrameCallback(capture);
+  }
+
+  function frameMatchesTv(video) {
+    return presentedFrame?.sessionId === activeSessionId
+      && presentedFrame.video === video
+      && matchesTvPosition(video.currentTime);
+  }
+
+  function requestSubtitleSelection() {
+    if (!viewerAccessToken || subtitleSelection || subtitleSelectionRequest
+        || now() < subtitleSelectionRetryAtMs) return;
+    const sessionId = activeSessionId;
+    subtitleSelectionRetryAtMs = now() + 1_000;
+    subtitleSelectionRequest = fetchImplementation("/Sessions", {
+      cache: "no-store",
+      headers: { "x-emby-token": viewerAccessToken },
+    }).then(async response => {
+      if (!response.ok) throw new Error(`Jellyfin sessions failed (${response.status})`);
+      const sessions = await response.json();
+      const browserSession = Array.isArray(sessions)
+        ? sessions.find(session => session.DeviceId === viewerDeviceId && session.NowPlayingItem)
+        : null;
+      if (!browserSession || activeSessionId !== sessionId) return;
+      const index = browserSession.PlayState?.SubtitleStreamIndex;
+      if (!Number.isInteger(index) || index < 0) {
+        subtitleSelection = { sessionId, codec: null };
+        return;
+      }
+      const stream = browserSession.NowPlayingItem.MediaStreams?.find(candidate => (
+        candidate.Type === "Subtitle" && candidate.Index === index
+      ));
+      subtitleSelection = { sessionId, codec: stream?.Codec?.toLowerCase() || "unknown" };
+    }).catch(() => {}).finally(() => {
+      if (activeSessionId === sessionId) subtitleSelectionRequest = null;
+    });
+  }
+
+  function subtitlesReady(frameDocument, video) {
+    if (subtitleSelection?.sessionId !== activeSessionId) return false;
+    const codec = subtitleSelection.codec;
+    if (codec === null) return true;
+    if (codec === "ass" || codec === "ssa") {
+      return assReadySessionId === activeSessionId
+        && Boolean(frameDocument.querySelector(".libassjs-canvas"));
+    }
+    if (codec === "pgssub") return pgsReadySessionId === activeSessionId;
+    if ([...video.textTracks || []].some(track => track.mode === "showing")) return true;
+    return Boolean(frameDocument.querySelector(".videoSubtitles"));
+  }
+
   function setColdPausedControlsVisible(visible) {
     try {
       frame?.contentWindow?.document?.documentElement?.classList?.toggle("cold-paused-hover", visible);
@@ -297,6 +427,7 @@ export function createPassiveViewer(options = {}) {
         const frameWindow = nextFrame.contentWindow;
         const frameDocument = frameWindow?.document;
         const video = frameDocument?.querySelector("video");
+        observeSubtitleWorkers(frameWindow);
         hardenPlayer(frameDocument, video);
         syncColdPausedHover(frameDocument, video);
         if (!activeSessionId) return;
@@ -306,6 +437,16 @@ export function createPassiveViewer(options = {}) {
         }
         if (frameWindow.location?.hash !== "#/video") frameWindow.location.hash = "#/video";
         synchronizeVideo(video);
+        observePresentedFrame(video);
+        if (!frameMatchesTv(video)) {
+          setStatus("Loading video", "Catching up to the TV.");
+          return;
+        }
+        requestSubtitleSelection();
+        if (!subtitlesReady(frameDocument, video)) {
+          setStatus("Loading subtitles", "Preparing the selected subtitle track.");
+          return;
+        }
         waiting.hidden = true;
         player.hidden = false;
       } catch (error) {
@@ -327,6 +468,7 @@ export function createPassiveViewer(options = {}) {
       const session = await response.json();
       if (bootGeneration !== generation || stopped) return null;
       writeJellyfinSession(session);
+      viewerAccessToken = session.accessToken;
       const nextFrame = document.createElement("iframe");
       nextFrame.title = "TV playback";
       nextFrame.allow = "autoplay; fullscreen; picture-in-picture";
@@ -345,7 +487,10 @@ export function createPassiveViewer(options = {}) {
 
   async function showPlaying(message) {
     const sessionChanged = activeSessionId !== message.sessionId;
-    if (sessionChanged) activeSessionHasPlayed = !message.paused;
+    if (sessionChanged) {
+      activeSessionHasPlayed = !message.paused;
+      resetPlaybackReadiness();
+    }
     else if (!message.paused) activeSessionHasPlayed = true;
     activeSessionId = message.sessionId;
     if (sessionChanged || !frame) {
