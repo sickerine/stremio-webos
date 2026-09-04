@@ -165,9 +165,12 @@ export class AssRenderer {
   }
   addCue(trackNumber, s) {
     if (!this.headers.has(trackNumber)) return;
-    const key = `${s.time}:${s.duration}:${s.text}`;
+    // Identity = start + layer + style + text. Duration is deliberately excluded (a resync
+    // re-emit could differ there and slip through); layer/style are included so a typeset
+    // pair with identical text on two layers is not collapsed.
+    const key = `${s.time}:${s.layer ?? 0}:${s.style ?? ""}:${s.text}`;
     let seen = this.seen.get(trackNumber); if (!seen) this.seen.set(trackNumber, seen = new Set());
-    if (seen.has(key)) return; seen.add(key);
+    if (seen.has(key)) { this.dupes = (this.dupes || 0) + 1; return; } seen.add(key);
     let list = this.events.get(trackNumber); if (!list) this.events.set(trackNumber, list = []);
     const ev = { payload: blockPayload(s, list.length + 1), time: s.time, duration: s.duration ?? 0 };
     list.push(ev);

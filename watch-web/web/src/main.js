@@ -186,6 +186,7 @@ setInterval(() => {
     t: video.currentTime.toFixed(1), tv: tvState && +estimateTvPosition(tvState).toFixed(1), paused: video.paused, rs: video.readyState, buffered: p.buffered().map(r => r.map(x => +x.toFixed(0))),
     video: p.tracks && `${p.tracks.video.codec} ${p.tracks.video.width}x${p.tracks.video.height}`, audio: a && `${a.codec} ${a.channels}ch ${a.transcode ? "transcode" : "direct"}`, audios: p.tracks?.audios.map(x => `${x.codec}:${x.playable ? "ok" : "no"}`),
     feed: p.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, startAt: +p.run.startAt.toFixed(1) }, starts: p.startCount || 0, opens: session.opens || 0, stage: ui.el.overlay.hidden ? null : ui.el.ovTitle.textContent,
+    subs: { sel: session.selectedSub, ass: session.ass.activeTrack, assPushed: session.ass.pushed, assDupes: session.ass.dupes || 0, textDupes: session.text.dupes, textCues: session.text.active != null ? (session.text.tracks.get(session.text.active)?.cues?.length ?? null) : null, streams: session.demux.stats.streamsOpened, cues: session.demux.stats.cues },
     recent: recent.map(e => [new Date(e.t).toISOString().slice(11, 23), e.k, e.s, e.st, e.ms]) } });
 }, 10000);
 
