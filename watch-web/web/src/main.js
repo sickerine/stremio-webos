@@ -19,9 +19,18 @@ const REMUX_COOLDOWN_MS = 5000;   // min gap between cold re-muxes while catchin
 
 const prefs = { audio: localStorage.getItem("watch.audio") || "", subs: localStorage.getItem("watch.subs") || "eng" };
 
+// "English" not "English · English": only append the track name when it adds information
+function trackLabel(lang, name) {
+  const l = fmtLang(lang);
+  return name && name.trim().toLowerCase() !== l.toLowerCase() ? `${l} · ${name.trim()}` : l;
+}
 function fmtLang(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch { return code || "und"; } }
 
-function showIdle() { ui.overlay(true, "Waiting for the TV", "Playback appears here automatically when the TV plays something."); ui.setTv(""); ui.setTitle(""); ui.setStats(""); }
+function showIdle() {
+  ui.setEyebrow("Standing by"); ui.setStage(null);
+  ui.overlay(true, "Waiting for the TV", "The moment something plays on the TV, it appears here and stays in sync. Nothing to click.");
+  ui.setTv(""); ui.setTitle(""); ui.setStats(""); ui.setHint("");
+}
 
 async function endSession() {
   const s = session; session = null;
@@ -32,7 +41,8 @@ async function endSession() {
 
 async function startSession(sessionId, cdnUrl, size) {
   await endSession();
-  ui.overlay(true, "Opening the stream", "Reading the file's tracks.");
+  ui.setEyebrow("Tuning in"); ui.setStage("open");
+  ui.overlay(true, tvState?.title || "Opening the stream", "Reading the file straight from the source and preparing it for your browser.");
   const s = { id: sessionId, cdnUrl, size, subTracks: [], selectedSub: null, fonts: 0 };
   s.ass = new AssRenderer(video, ui.el.assLayer);
   s.text = new TextSubtitles(video);
@@ -49,6 +59,8 @@ async function startSession(sessionId, cdnUrl, size) {
   try {
     await s.pipeline.open(cdnUrl, { tee: s.demux, size });
     if (session !== s) return;
+    ui.setStage("load");
+    ui.setHint(`${s.pipeline.tracks.video.width}×${s.pipeline.tracks.video.height} · ${s.pipeline.tracks.audios.length} audio · ${(s.pipeline.tracks.size / 1073741824).toFixed(1)} GB`);
     // walk the header for subtitle tracks + fonts (tracks usually arrive within the first MB)
     void s.pipeline.source.prefetch(0, 16 * 1024 * 1024).catch(() => {});
     const startAt = estimateTvPosition(tvState) ?? 0;
@@ -56,17 +68,17 @@ async function startSession(sessionId, cdnUrl, size) {
     lastRemuxAt = Date.now();
     await s.pipeline.start(startAt, preferred ?? undefined);
     if (session !== s) return;
+    renderAudioMenu();               // now that the default audio track is chosen
     video.currentTime = startAt;
-    ui.overlay(true, "Loading video", "Catching up to the TV.");
   } catch (e) {
     console.error(e);
-    if (session === s) ui.overlay(true, "Can't play this stream", e.message);
+    if (session === s) { ui.setEyebrow("Problem"); ui.setStage(null); ui.overlay(true, "Can't play this stream", e.message); }
   }
 }
 
 function renderAudioMenu() {
   const s = session; if (!s?.pipeline.tracks) return;
-  const items = s.pipeline.tracks.audios.map(a => ({ id: a.id, label: fmtLang(a.language) + (a.name ? ` · ${a.name}` : ""), sub: `${String(a.codec).toUpperCase()} ${a.channels}ch${a.playable ? "" : " · unsupported"}` }));
+  const items = s.pipeline.tracks.audios.map(a => ({ id: a.id, label: trackLabel(a.language, a.name), sub: `${String(a.codec).toUpperCase()} ${a.channels}ch${a.transcode ? " · Opus" : ""}${a.playable ? "" : " · unsupported"}` }));
   ui.audioMenu(items, s.pipeline.selectedAudioId, async id => {
     const a = s.pipeline.tracks.audios.find(x => x.id === id); if (!a?.playable) return;
     localStorage.setItem("watch.audio", a.language || ""); prefs.audio = a.language || "";
@@ -75,7 +87,7 @@ function renderAudioMenu() {
 }
 function renderSubsMenu() {
   const s = session; if (!s) return;
-  const items = s.subTracks.map(t => ({ id: t.number, label: fmtLang(t.language || "eng") + (t.name ? ` · ${t.name}` : ""), sub: (t.type || "").toUpperCase() }));
+  const items = s.subTracks.map(t => ({ id: t.number, label: trackLabel(t.language || "eng", t.name), sub: (t.type === "utf8" ? "SRT" : (t.type || "")).toUpperCase() }));
   ui.subsMenu(items, s.selectedSub, id => selectSub(id, true));
 }
 function autoSelectSub() {
@@ -125,7 +137,7 @@ async function follow() {
     }
   } else video.playbackRate = act.playbackRate;
 
-  if (video.readyState >= 3 && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) ui.overlay(false);
+  if (video.readyState >= 3 && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) { ui.setStage("done"); ui.overlay(false); }
   else if (video.readyState < 3 && s.pipeline.isBuffered(target) === false && ui.el.overlay.hidden) { /* stalled; leave player visible */ }
 }
 setInterval(follow, 250);
@@ -144,7 +156,9 @@ connectRelay({
   onState: state => {
     tvState = { ...state, receivedAtMs: Date.now() };
     ui.setTitle(state.title || state.episodeId || "");
-    ui.setTv(state.paused ? "TV paused" : "");
+    ui.setKicker(state.paused ? "TV paused" : "Live with the TV");
+    ui.setTv(state.paused ? "Paused on the TV" : "");
+    if (!session) { ui.setEyebrow("Tuning in"); ui.setStage("resolve"); ui.overlay(true, state.title || "Locating the stream", "The TV just started something. Finding the source."); }
     if (session && session.id !== state.sessionId) { void endSession(); ui.overlay(true, "Switching stream", "The TV changed what it's playing."); }
   },
   onMedia: (cdnUrl, sessionId, { size, resolveError } = {}) => {
@@ -153,6 +167,7 @@ connectRelay({
   },
   onIdle: () => { void endSession(); tvState = null; showIdle(); },
 });
+ui.setRoom(room === "home" ? "" : `room · ${room}`);
 showIdle();
 
 // Debug/inspection handle (also drives the automated browser tests).
