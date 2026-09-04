@@ -82,6 +82,7 @@ export class Pipeline {
 
   // ---- start (or restart) muxing from `startAt` with the given audio track ----
   async start(startAt, audioId = this.selectedAudioId ?? this.pickDefaultAudio()) {
+    this.startCount = (this.startCount || 0) + 1;
     if (!this.tracks) throw new Error("open() first");
     await this._cancelRun();
     this.selectedAudioId = audioId;
