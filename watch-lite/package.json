@@ -1,0 +1,14 @@
+{
+  "name": "stremio-watch-lite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "hls.js": "^1.7.2",
+    "ws": "^8.18.3"
+  }
+}
