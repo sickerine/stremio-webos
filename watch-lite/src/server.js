@@ -113,8 +113,17 @@ export function createWatchLiteServer(options = {}) {
       let message;
       try { message = JSON.parse(data.toString()); }
       catch { send(socket, { type: "error", code: "invalid-json" }); return; }
-      if (message.type !== "state") return;
       if (identity.role !== "tv") { send(socket, { type: "error", code: "viewer-read-only" }); return; }
+      // TV stopped playback: drop the stream and put viewers back on Waiting.
+      if (message.type === "idle") {
+        if (!message.sessionId || !room.state || room.state.sessionId === message.sessionId) {
+          if (room.mediaSessionId) mediaManager.release?.(room.mediaSessionId);
+          room.mediaSessionId = null; room.media = null; room.state = null;
+          broadcast(room, { type: "room-idle" });
+        }
+        return;
+      }
+      if (message.type !== "state") return;
 
       const next = normalizeState(message.state);
       if (!next) { send(socket, { type: "error", code: "invalid-state" }); return; }

@@ -1,0 +1,21 @@
+name: stremio-watch-lite
+
+services:
+  watch-lite:
+    build: .
+    container_name: stremio-watch-lite
+    init: true
+    # 3211 is where the TV bridge already points; 3210 is the browser link people know.
+    ports:
+      - "3210:3211"
+      - "3211:3211"
+    tmpfs:
+      - /data/media:size=4g
+    cpus: 2.0
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3211/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
