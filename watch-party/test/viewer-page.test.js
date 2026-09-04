@@ -366,9 +366,10 @@ test("the passive player limits forced visibility to cold-paused hover", async (
   assert.match(style, /display:\s*none/);
   assert.match(style, /\.cold-paused-hover \.skinHeader/);
   assert.match(style, /\.cold-paused-hover \.videoOsdBottom/);
+  assert.match(style, /pointer-events: auto !important/);
+  assert.match(style, /z-index: 1001 !important/);
   assert.doesNotMatch(style, /^\s*\.skinHeader/m);
   assert.doesNotMatch(style, /^\s*\.videoOsdBottom/m);
-  assert.doesNotMatch(style, /pointer-events/);
   assert.doesNotMatch(style, /\.osdPositionSlider/);
   assert.doesNotMatch(style, /\.btnPause/);
 });
