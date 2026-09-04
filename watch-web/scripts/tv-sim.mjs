@@ -4,9 +4,9 @@
 //   pause | play | seek <sec> | idle | url <newUrl> [pos]
 import { WebSocket } from "ws";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-const port = process.env.PORT || 3211, cmdFile = process.env.CMD || "/tmp/ww-tv-cmd";
+const port = process.env.PORT || 3211, cmdFile = process.env.CMD || "/tmp/ww-tv-cmd", room = process.env.ROOM || "home";
 let url = process.env.URL, pos = Number(process.env.POS || 0), paused = process.env.PAUSED === "1", seq = 0, session = Date.now().toString(36);
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv`);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv&room=${room}`);
 const state = () => ({ type: "state", state: { sessionId: `sim-${session}`, sequence: ++seq, positionSeconds: pos, paused, playbackRate: 1, buffering: false, mediaUrl: url, title: process.env.TITLE || "tv-sim", episodeId: "sim" } });
 const send = () => ws.send(JSON.stringify(state()));
 ws.on("open", () => {
