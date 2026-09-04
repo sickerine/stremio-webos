@@ -4,6 +4,8 @@ const PASSIVE_PLAYER_STYLE = `
     display: flex !important;
     opacity: 1 !important;
     visibility: visible !important;
+    pointer-events: auto !important;
+    z-index: 1001 !important;
   }
 
   .headerBackButton {
