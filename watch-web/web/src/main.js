@@ -32,7 +32,7 @@ async function startSession(sessionId, cdnUrl, size) {
   await endSession();
   ui.overlay(true, "Opening the stream", "Reading the file's tracks.");
   const s = { id: sessionId, cdnUrl, size, subTracks: [], selectedSub: null, fonts: 0 };
-  s.ass = new AssRenderer(video);
+  s.ass = new AssRenderer(video, ui.el.assLayer);
   s.text = new TextSubtitles(video);
   s.demux = new SubtitleDemux({
     onTracks: tracks => { s.subTracks = tracks; s.ass.setTracks(tracks); s.text.setTracks(tracks); renderSubsMenu(); autoSelectSub(); },
@@ -50,7 +50,7 @@ async function startSession(sessionId, cdnUrl, size) {
     // walk the header for subtitle tracks + fonts (tracks usually arrive within the first MB)
     void s.pipeline.source.prefetch(0, 16 * 1024 * 1024).catch(() => {});
     const startAt = estimateTvPosition(tvState) ?? 0;
-    const preferred = prefs.audio && s.pipeline.tracks.audios.find(a => a.language === prefs.audio && a.playable)?.id;
+    const preferred = prefs.audio ? s.pipeline.tracks.audios.find(a => a.language === prefs.audio && a.playable)?.id : undefined;
     await s.pipeline.start(startAt, preferred ?? undefined);
     if (session !== s) return;
     video.currentTime = startAt;
@@ -113,6 +113,8 @@ async function follow() {
 }
 setInterval(follow, 250);
 
+// Repaint ASS on the current frame when paused (no rVFC fires then).
+for (const ev of ["seeked", "pause", "timeupdate"]) video.addEventListener(ev, () => { if (video.paused) session?.ass.renderNow(); });
 video.addEventListener("waiting", () => ui.setTv(tvState?.paused ? "TV paused" : "Buffering"));
 video.addEventListener("playing", () => ui.setTv(tvState?.paused ? "TV paused" : ""));
 
@@ -135,3 +137,20 @@ connectRelay({
   onIdle: () => { void endSession(); tvState = null; showIdle(); },
 });
 showIdle();
+
+// Debug/inspection handle (also drives the automated browser tests).
+window.__watch = () => {
+  const s = session; const p = s?.pipeline;
+  return {
+    tv: tvState && { pos: tvState.positionSeconds, paused: tvState.paused, est: estimateTvPosition(tvState) },
+    video: { t: video.currentTime, paused: video.paused, rs: video.readyState, rate: video.playbackRate, muted: video.muted, w: video.videoWidth, h: video.videoHeight },
+    buffered: p?.buffered() || [],
+    tracks: p?.tracks && { video: { codec: p.tracks.video.codec, codecString: p.tracks.video.codecString, hdr: p.tracks.video.hdr }, audios: p.tracks.audios.map(a => ({ id: a.id, lang: a.language, codec: a.codec, ch: a.channels, playable: a.playable })), duration: p.tracks.duration },
+    selectedAudio: p?.selectedAudioId ?? null,
+    subs: s && { tracks: s.subTracks.map(t => ({ n: t.number, lang: t.language, type: t.type, name: t.name })), selected: s.selectedSub, fonts: s.fonts, assEvents: Object.fromEntries([...s.ass.events].map(([k, v]) => [k, v.length])), activeAss: s.ass.activeTrack, jassub: Boolean(s.ass.jassub), jassubReady: s.ass.ready, pushed: s.ass.pushed, showCalls: s.ass.showCalls, assError: s.ass.lastError, demux: { ...s.demux.stats, firstCluster: s.demux.firstCluster, headerCursor: s.demux.headerCursor, cursor: s.demux.cursor, pending: s.demux.pending.size } },
+    net: p?.source && { requests: p.source.requests, fetchedMB: +(p.source.bytesFetched / 1048576).toFixed(1), size: p.source.size },
+  };
+};
+window.__watchSelectSub = n => selectSub(n, true);
+window.__session = () => session;
+window.__watchSelectAudio = id => session?.pipeline.selectAudio(id).then(renderAudioMenu);

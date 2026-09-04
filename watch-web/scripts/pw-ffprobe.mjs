@@ -1,0 +1,24 @@
+import { firefox } from "playwright";
+const browser = await firefox.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const logs = [];
+page.on("console", m => logs.push(`[page:${m.type()}] ${m.text().slice(0, 200)}`));
+page.on("worker", w => w.on("console", m => logs.push(`[worker:${m.type()}] ${m.text().slice(0, 200)}`)));
+await page.goto("http://127.0.0.1:3211/?room=home");
+await page.waitForTimeout(12000);
+const r = await page.evaluate(async () => {
+  const s = window.__session(); const v = document.querySelector("video"); const j = s.ass.jassub;
+  const evs = (s.ass.events.get(3) || []).map(e => ({ t: e.time / 1000, d: e.duration / 1000, txt: e.payload.split(",").slice(8).join(",").slice(0, 40) }));
+  const active = evs.filter(e => v.currentTime >= e.t && v.currentTime < e.t + e.d);
+  const before = { canvasSize: [j._canvas.width, j._canvas.height], vw: j._videoWidth, vh: j._videoHeight, videoWH: [v.videoWidth, v.videoHeight], paused: v.paused, t: v.currentTime };
+  await j.resize(true).catch(() => {});
+  await j.manualRender({ mediaTime: v.currentTime, expectedDisplayTime: performance.now(), width: v.videoWidth, height: v.videoHeight }, true).catch(e => e);
+  await new Promise(r => setTimeout(r, 500));
+  const after = { canvasSize: [j._canvas.width, j._canvas.height], vw: j._videoWidth, vh: j._videoHeight };
+  const libassEvents = (await j.renderer.getEvents()).length;
+  return { before, after, libassEvents, active, ready: s.ass.ready, pushed: s.ass.pushed, nearby: evs.filter(e => Math.abs(e.t - v.currentTime) < 8) };
+});
+await page.screenshot({ path: "/tmp/pw-ffprobe.png" });
+console.log(JSON.stringify(r, null, 1));
+console.log("=== LOGS ==="); for (const l of [...new Set(logs)]) if (!/FPS:/.test(l)) console.log(l);
+await browser.close();

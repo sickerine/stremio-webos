@@ -50,13 +50,22 @@ export class ByteSource {
     const start = index * this.chunkSize;
     const end = Math.min(start + this.chunkSize, this.size) - 1;
     const p = (async () => {
-      const res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-${end}` } });
-      this.requests++;
-      if (!(res.status === 206 || res.status === 200)) throw new Error(`Range fetch failed: ${res.status}`);
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      this.bytesFetched += bytes.byteLength;
-      this._teeMaybe(start, bytes);
-      return bytes;
+      // The CDN occasionally answers a Range request without CORS headers or drops the
+      // connection; a couple of retries with backoff keeps one flaky response from
+      // killing playback.
+      let lastError;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-${end}` } });
+          this.requests++;
+          if (!(res.status === 206 || res.status === 200)) throw new Error(`Range fetch failed: ${res.status}`);
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          this.bytesFetched += bytes.byteLength;
+          this._teeMaybe(start, bytes);
+          return bytes;
+        } catch (e) { lastError = e; this.retries = (this.retries || 0) + 1; await new Promise(r => setTimeout(r, 300 * (attempt + 1))); }
+      }
+      throw lastError;
     })();
     this.chunks.set(index, p);
     this.order.push(index);
