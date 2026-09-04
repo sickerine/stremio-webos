@@ -15,7 +15,9 @@ import { ByteSource } from "../net/byte-source.js";
 registerAc3Decoder();   // AC-3 + E-AC-3
 registerDtsDecoder();   // DTS (incl. DTS-HD core)
 
-const AHEAD_SECONDS = 90;      // don't mux more than this ahead of the playhead
+const AHEAD_SECONDS = 90;      // don't mux more than this ahead of the playhead...
+const AHEAD_BYTES = 120 * 1024 * 1024;   // ...nor more than this: Chrome's MSE quota is ~150 MB of video, and over-feeding
+                                          // makes it evict from the tail, which the buffered-range check can't see
 const BEHIND_SECONDS = 45;     // evict buffer older than this
 const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
 const OPUS_BITRATE = 256_000;
@@ -141,12 +143,19 @@ export class Pipeline {
     const sampleIter = aTrack && transcode ? new AudioSampleSink(aTrack).samples(vKey.timestamp) : null;
     let aSample = sampleIter ? (await sampleIter.next()).value || null : null;
     run.stage = "feeding";
-    let nv = 0, na = 0;
+    let nv = 0, na = 0, lastTs = startAt;
+    const bytes0 = this.source.bytesFetched;
 
+    // Pace on what we have FED (last video timestamp), not on MSE's buffered ranges:
+    // once Chrome starts evicting, the range around the playhead stops growing and a
+    // buffered-range check would feed the whole file. Cap by bytes too, estimated from
+    // this run's own download so 4K gets ~15s ahead and 1080p the full 90s.
     const throttle = async () => {
       while (!run.cancelled) {
-        const end = this._bufferedEnd();
-        if (end == null || end - this.video.currentTime < AHEAD_SECONDS) return;
+        const fed = lastTs - startAt;
+        const rate = fed > 4 ? (this.source.bytesFetched - bytes0) / fed : 0;   // bytes per media second
+        const limit = Math.max(8, rate > 0 ? Math.min(AHEAD_SECONDS, AHEAD_BYTES / rate) : AHEAD_SECONDS);
+        if (lastTs - this.video.currentTime < limit) return;
         await new Promise(r => setTimeout(r, 250));
       }
     };
@@ -166,7 +175,7 @@ export class Pipeline {
 
     for await (const p of vSink.packets(vKey)) {
       if (run.cancelled) break;
-      await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++; run.nv = nv;
+      await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++; run.nv = nv; lastTs = p.timestamp;
       // Keep audio a few seconds ahead of video: MSE's playable range is the
       // INTERSECTION of the track buffers, so audio must fully cover each video
       // fragment or the range fragments into gaps.
