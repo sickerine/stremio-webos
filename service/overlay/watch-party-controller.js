@@ -46,8 +46,12 @@
         if (!video) return 0;
         if (!video.paused) {
             try {
+                // The ASS clock is only trustworthy while it is RUNNING and its rAF loop is
+                // alive (it only ticks when a subtitle renderer exists). Otherwise a seek
+                // freezes it for good and viewers would see a TV that never advances.
                 var controller = window.__assCtl;
                 var position = controller && controller.video === video && controller.clock
+                    && controller.clock.running && controller.jassub && !controller._seeking
                     ? controller.clock.now(performance.now())
                     : NaN;
                 if (isFinite(position) && position >= 0) return position;
