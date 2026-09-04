@@ -14,6 +14,8 @@ let tvState = null;              // last TV sample (+receivedAtMs)
 let session = null;              // { id, cdnUrl, pipeline, demux, ass, text, subTracks, selectedSub }
 let audioUnlocked = false;
 let seeking = false;
+let lastRemuxAt = 0;
+const REMUX_COOLDOWN_MS = 5000;   // min gap between cold re-muxes while catching up
 
 const prefs = { audio: localStorage.getItem("watch.audio") || "", subs: localStorage.getItem("watch.subs") || "eng" };
 
@@ -51,6 +53,7 @@ async function startSession(sessionId, cdnUrl, size) {
     void s.pipeline.source.prefetch(0, 16 * 1024 * 1024).catch(() => {});
     const startAt = estimateTvPosition(tvState) ?? 0;
     const preferred = prefs.audio ? s.pipeline.tracks.audios.find(a => a.language === prefs.audio && a.playable)?.id : undefined;
+    lastRemuxAt = Date.now();
     await s.pipeline.start(startAt, preferred ?? undefined);
     if (session !== s) return;
     video.currentTime = startAt;
@@ -103,9 +106,23 @@ async function follow() {
 
   const act = syncAction(video.currentTime, target);
   if (act.type === "seek") {
-    seeking = true;
-    try { await s.pipeline.seekTo(target); } finally { seeking = false; }
-    video.playbackRate = 1;
+    // If the target is already buffered, jump instantly. Otherwise a hard seek means
+    // re-muxing from there, which clears the buffer; don't do that again until the
+    // mux has had a few seconds to build toward the last target, or the browser will
+    // restart forever while the TV keeps moving ahead of a cold buffer.
+    if (s.pipeline.isBuffered(target)) {
+      seeking = true;
+      try { await s.pipeline.seekTo(target); } finally { seeking = false; }
+      video.playbackRate = 1;
+    } else if (Date.now() - lastRemuxAt > REMUX_COOLDOWN_MS) {
+      lastRemuxAt = Date.now();
+      seeking = true;
+      try { await s.pipeline.start(Math.max(0, target - 2)); video.currentTime = target; } finally { seeking = false; }
+      video.playbackRate = 1;
+    } else {
+      // waiting for the in-flight re-mux to reach the target; nudge toward it
+      video.playbackRate = 1;
+    }
   } else video.playbackRate = act.playbackRate;
 
   if (video.readyState >= 3 && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) ui.overlay(false);

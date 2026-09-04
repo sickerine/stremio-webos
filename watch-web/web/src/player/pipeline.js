@@ -167,11 +167,15 @@ export class Pipeline {
     for await (const p of vSink.packets(vKey)) {
       if (run.cancelled) break;
       await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++; run.nv = nv;
-      await pumpAudioTo(p.timestamp + 0.5);
+      // Keep audio a few seconds ahead of video: MSE's playable range is the
+      // INTERSECTION of the track buffers, so audio must fully cover each video
+      // fragment or the range fragments into gaps.
+      await pumpAudioTo(p.timestamp + 3);
       if ((nv & 7) === 0) { await throttle(); this._evict(); }
     }
-    if (run.cancelled) return;
+    if (run.cancelled) { aSample?.close?.(); return; }
     await pumpAudioTo(Infinity);
+    aSample?.close?.();
     await run.output.finalize();
     if (!run.cancelled && this.mediaSource.readyState === "open") { await this._whenIdle(); try { this.mediaSource.endOfStream(); } catch {} }
     this.onStatus?.({ phase: "complete" });
