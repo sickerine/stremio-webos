@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateTvPosition, syncAction, isBuffered } from "../web/src/sync.js";
+import { estimateTvPosition, syncAction, isBuffered, tvJumped } from "../web/src/sync.js";
 import { normalizeState, resolveRedirects } from "../server/server.js";
 import { ByteSource } from "../web/src/net/byte-source.js";
 
@@ -15,6 +15,15 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
   assert.equal(syncAction(100, 100.2).type, "none");
   assert.equal(syncAction(100, 101.5).type, "rate");
   assert.equal(syncAction(100, 104).type, "seek");
+  // paused or just-jumped: land on the frame, don't nudge
+  assert.equal(syncAction(100, 100.2, { paused: true }).type, "seek");
+  assert.equal(syncAction(100, 100.05, { paused: true }).type, "none");
+  assert.equal(syncAction(100, 101.5, { snap: true }).type, "seek");
+  const prev = { sessionId: "a", positionSeconds: 100, paused: false, playbackRate: 1, receivedAtMs: 0 };
+  assert.ok(!tvJumped(prev, { sessionId: "a", positionSeconds: 101.1, paused: false }, 1000));
+  assert.ok(tvJumped(prev, { sessionId: "a", positionSeconds: 130, paused: false }, 1000));
+  assert.ok(tvJumped(prev, { sessionId: "a", positionSeconds: 101, paused: true }, 1000));
+  assert.ok(!tvJumped(prev, { sessionId: "b", positionSeconds: 130, paused: false }, 1000));
   assert.ok(isBuffered([[90, 120]], 100));
   assert.ok(!isBuffered([[90, 120]], 130));
 });
