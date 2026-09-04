@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { estimateTvPosition, syncAction, isBuffered, tvJumped, bestOffset } from "../web/src/sync.js";
-import { normalizeState, resolveRedirects } from "../server/server.js";
+import { normalizeState, resolveRedirects, createRelayServer } from "../server/server.js";
+import { WebSocket } from "ws";
 import { ByteSource } from "../web/src/net/byte-source.js";
 
 test("TV position estimate advances only while playing and not buffering", () => {
@@ -67,4 +68,22 @@ test("ByteSource serves arbitrary ranges from 4 MiB-aligned chunk fetches and te
   assert.ok(requests <= 1 + 2 + 2, `too many requests: ${requests}`);        // size probe + 2 chunks + prefetch
   const offsets = teed.map(t => t[0]).sort((x, y) => x - y);
   assert.deepEqual(offsets.slice(0, 2), [0, 4 * 1024 * 1024], "tee received the two needed chunks");
+});
+
+test("relay marks a room idle when the TV stops heartbeating", async () => {
+  const server = createRelayServer({ resolve: async url => ({ url, size: null }), staleMs: 120 });
+  await server.listen(0, "127.0.0.1");
+  const base = `ws://127.0.0.1:${server.address().port}/ws?room=t`;
+  const open = url => new Promise(ok => { const s = new WebSocket(url); s.on("open", () => ok(s)); });
+  const tv = await open(`${base}&role=tv`);
+  tv.send(JSON.stringify({ type: "state", state: { sessionId: "s1", sequence: 1, positionSeconds: 5, mediaUrl: "http://x/y.mkv" } }));
+  await new Promise(r => setTimeout(r, 30));
+  const viewer = await open(`${base}&role=viewer`);
+  const got = [];
+  viewer.on("message", d => got.push(JSON.parse(d.toString()).type));
+  tv.close();                                           // TV app relaunched: no idle message ever comes
+  await new Promise(r => setTimeout(r, 400));
+  assert.ok(got.includes("room-idle"), `expected room-idle, got ${got}`);
+  viewer.close();
+  await server.close();
 });

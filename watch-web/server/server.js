@@ -61,11 +61,20 @@ function headRequest(url) {
   });
 }
 
-export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST } = {}) {
+export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST, staleMs = 6000 } = {}) {
   const rooms = new Map();
   const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null }); return rooms.get(id); };
   const send = (s, m) => { if (s.readyState === WebSocket.OPEN) s.send(JSON.stringify(m)); };
   const broadcast = (room, m) => { for (const c of room.clients) send(c, m); };
+  const goIdle = room => { room.state = null; room.cdnUrl = null; room.size = null; room.resolving = null; room.resolveError = null; broadcast(room, { type: "room-idle" }); };
+
+  // The TV heartbeats every 500ms while it has media. If a room's last sample is
+  // older than staleMs the TV is gone (relaunched, crashed, unplugged): its own idle
+  // message never comes, because a fresh app instance knows nothing of the old session.
+  const sweeper = setInterval(() => {
+    for (const [id, room] of rooms) if (room.state && Date.now() - room.state.sentAtMs > staleMs) { console.log(`[relay] ${id}: no TV heartbeat for ${staleMs}ms, idle`); goIdle(room); }
+  }, Math.max(20, staleMs / 3));
+  sweeper.unref?.();
 
   const httpServer = http.createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -121,10 +130,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST 
       if (role !== "tv") return send(socket, { type: "error", code: "viewer-read-only" });
 
       if (msg.type === "idle") {
-        if (!msg.sessionId || !room.state || room.state.sessionId === msg.sessionId) {
-          room.state = null; room.cdnUrl = null; room.size = null; room.resolving = null;
-          broadcast(room, { type: "room-idle" });
-        }
+        if (!msg.sessionId || !room.state || room.state.sessionId === msg.sessionId) goIdle(room);
         return;
       }
       if (msg.type !== "state") return;
@@ -171,7 +177,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST 
   return {
     address: () => httpServer.address(),
     listen: (port, host) => new Promise((ok, bad) => { httpServer.once("error", bad); httpServer.listen(port, host, () => { httpServer.off("error", bad); ok(); }); }),
-    close: () => new Promise((ok, bad) => { for (const c of wss.clients) c.terminate(); wss.close(); httpServer.close(e => e ? bad(e) : ok()); httpServer.closeAllConnections?.(); }),
+    close: () => new Promise((ok, bad) => { clearInterval(sweeper); for (const c of wss.clients) c.terminate(); wss.close(); httpServer.close(e => e ? bad(e) : ok()); httpServer.closeAllConnections?.(); }),
   };
 }
 
