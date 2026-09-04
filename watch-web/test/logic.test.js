@@ -46,16 +46,19 @@ test("resolver follows the torrentio -> torbox -> cdn chain and stops at 200", a
   assert.deepEqual(final, { url: "https://cdn/file.mkv?token=k", size: 1447114629 });
 });
 
-test("ByteSource serves arbitrary ranges from 4 MiB-aligned chunk fetches and tees bytes in order", async () => {
-  const size = 10 * 1024 * 1024 + 123;
+test("ByteSource streams sequential reads over one Range request and tees bytes in order", async () => {
+  const size = 60 * 1024 * 1024 + 123;                                        // 15 chunks: the tail read below is a real seek
   const file = new Uint8Array(size); for (let i = 0; i < size; i += 4099) file[i] = (i / 4099) & 255;
-  let requests = 0;
-  const fetchImpl = async (_u, { headers, method } = {}) => {
-    requests++;
+  const ranges = [];
+  const fetchImpl = async (_u, { headers, method, signal } = {}) => {
     if (method === "HEAD" || !headers?.Range) return { ok: true, status: 200, headers: new Headers({ "content-length": String(size) }), body: { cancel: async () => {} } };
     const [, a, b] = /bytes=(\d+)-(\d*)/.exec(headers.Range);
     const start = +a, end = b === "" ? size - 1 : Math.min(+b, size - 1);
-    return { status: 206, headers: new Headers({ "content-range": `bytes ${start}-${end}/${size}` }), arrayBuffer: async () => file.slice(start, end + 1).buffer };
+    ranges.push(headers.Range);
+    // stream the body in 1 MiB pieces so chunk boundaries fall mid-read
+    let pos = start;
+    const body = new ReadableStream({ pull(c) { if (signal?.aborted) return c.error(new Error("aborted")); if (pos > end) return c.close(); const n = Math.min(1 << 20, end + 1 - pos); c.enqueue(file.slice(pos, pos + n)); pos += n; } });
+    return new Response(body, { status: 206, headers: { "content-range": `bytes ${start}-${end}/${size}` } });
   };
   const src = new ByteSource("https://x/f.mkv", { fetchImpl });
   const teed = []; src.setTee({ write: (o, b) => teed.push([o, b.byteLength]) });
@@ -65,9 +68,15 @@ test("ByteSource serves arbitrary ranges from 4 MiB-aligned chunk fetches and te
   assert.deepEqual([...a], [...file.subarray(4 * 1024 * 1024 - 10, 4 * 1024 * 1024 + 10)]);
   const b = await src.read(100, 200);                                          // served from cache
   assert.deepEqual([...b], [...file.subarray(100, 200)]);
-  assert.ok(requests <= 1 + 2 + 2, `too many requests: ${requests}`);        // size probe + 2 chunks + prefetch
+  const c = await src.read(6 * 1024 * 1024, 6 * 1024 * 1024 + 5);              // still sequential: rides the same stream
+  assert.deepEqual([...c], [...file.subarray(6 * 1024 * 1024, 6 * 1024 * 1024 + 5)]);
+  assert.deepEqual(ranges, ["bytes=0-"], "one open-ended request served everything so far");
+  const tail = await src.read(size - 5, size);                                 // a seek: new stream, final partial chunk
+  assert.deepEqual([...tail], [...file.subarray(size - 5)]);
+  assert.equal(ranges.length, 2);
   const offsets = teed.map(t => t[0]).sort((x, y) => x - y);
-  assert.deepEqual(offsets.slice(0, 2), [0, 4 * 1024 * 1024], "tee received the two needed chunks");
+  assert.deepEqual(offsets.slice(0, 2), [0, 4 * 1024 * 1024], "tee received the chunks in file order");
+  src.dispose();
 });
 
 test("relay marks a room idle when the TV stops heartbeating", async () => {
