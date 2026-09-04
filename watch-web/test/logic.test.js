@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateTvPosition, syncAction, isBuffered, tvJumped } from "../web/src/sync.js";
+import { estimateTvPosition, syncAction, isBuffered, tvJumped, bestOffset } from "../web/src/sync.js";
 import { normalizeState, resolveRedirects } from "../server/server.js";
 import { ByteSource } from "../web/src/net/byte-source.js";
 
@@ -24,6 +24,9 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
   assert.ok(tvJumped(prev, { sessionId: "a", positionSeconds: 130, paused: false }, 1000));
   assert.ok(tvJumped(prev, { sessionId: "a", positionSeconds: 101, paused: true }, 1000));
   assert.ok(!tvJumped(prev, { sessionId: "b", positionSeconds: 130, paused: false }, 1000));
+  // clock sync trusts the fastest ping
+  assert.equal(bestOffset([{ rtt: 40, offset: 10 }, { rtt: 12, offset: 3 }, { rtt: 90, offset: -20 }]), 3);
+  assert.equal(bestOffset([]), null);
   assert.ok(isBuffered([[90, 120]], 100));
   assert.ok(!isBuffered([[90, 120]], 130));
 });

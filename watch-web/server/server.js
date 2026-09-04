@@ -117,6 +117,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST 
     socket.on("close", () => room.clients.delete(socket));
     socket.on("message", async data => {
       let msg; try { msg = JSON.parse(data.toString()); } catch { return send(socket, { type: "error", code: "invalid-json" }); }
+      if (msg.type === "ping") return send(socket, { type: "pong", t: msg.t, serverMs: Date.now() });
       if (role !== "tv") return send(socket, { type: "error", code: "viewer-read-only" });
 
       if (msg.type === "idle") {
