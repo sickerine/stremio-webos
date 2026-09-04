@@ -168,6 +168,15 @@ async function follow() {
 }
 setInterval(follow, 250);
 
+// Every 10s, tell the relay what this browser has been asking the CDN for (see server netlog).
+let netlogSent = 0;
+setInterval(() => {
+  const src = session?.pipeline?.source; if (!src) return;
+  const recent = src.log.filter(e => e.t > netlogSent); netlogSent = Date.now();
+  if (!recent.length && !src.retries) return;
+  relay.send({ type: "netlog", data: { host: (() => { try { return new URL(src.url).host; } catch { return "?"; } })(), requests: src.requests, retries: src.retries, MB: +(src.bytesFetched / 1048576).toFixed(0), t: video.currentTime.toFixed(1), buffered: session.pipeline.buffered().map(r => r.map(x => +x.toFixed(0))), recent: recent.map(e => [new Date(e.t).toISOString().slice(11, 23), e.k, e.s, e.st, e.ms]) } });
+}, 10000);
+
 // Repaint ASS on the current frame when paused (no rVFC fires then).
 for (const ev of ["seeked", "pause", "timeupdate"]) video.addEventListener(ev, () => { if (video.paused) session?.ass.renderNow(); });
 video.addEventListener("waiting", () => ui.setTv(tvState?.paused ? "Paused on the TV" : "Buffering", tvState?.paused ? "warn" : ""));

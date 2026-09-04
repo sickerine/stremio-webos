@@ -127,6 +127,9 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
     socket.on("message", async data => {
       let msg; try { msg = JSON.parse(data.toString()); } catch { return send(socket, { type: "error", code: "invalid-json" }); }
       if (msg.type === "ping") return send(socket, { type: "pong", t: msg.t, serverMs: Date.now() });
+      // Viewer diagnostics: the browser's recent CDN requests, so a CDN ban can be read
+      // back from `docker logs` without asking the viewer to open devtools.
+      if (msg.type === "netlog") { console.log(`[netlog] ${roomId} ${JSON.stringify(msg.data).slice(0, 4000)}`); return; }
       if (role !== "tv") return send(socket, { type: "error", code: "viewer-read-only" });
 
       if (msg.type === "idle") {
