@@ -94,7 +94,10 @@ export class ByteSource {
     const old = this.stream;
     if (old) {
       this.stream = null; old.abort.abort(); old.wake?.();
-      for (const [i, d] of old.deferreds) if (!d.settled) this._fetchOne(i).then(b => { d.resolve(b); this._settled(i); }, e => d.reject(e));
+      // One at a time: TorBox bans IPs that pull ranges over several connections at once.
+      for (const [i, d] of old.deferreds) if (!d.settled) {
+        this._oneQueue = (this._oneQueue || Promise.resolve()).then(() => d.settled ? null : this._fetchOne(i).then(b => { d.resolve(b); this._settled(i); }, e => d.reject(e)));
+      }
     }
     const s = { next: index, wanted: index, deferreds: new Map(), abort: new AbortController(), wake: null };
     this.stream = s;
