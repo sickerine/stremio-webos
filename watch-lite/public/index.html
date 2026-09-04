@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stremio Watch</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="stage">
+    <video id="player" playsinline></video>
+    <div id="overlay">
+      <div class="overlay-card">
+        <h1 id="overlay-title">Waiting for the TV</h1>
+        <p id="overlay-body">Playback appears here automatically.</p>
+      </div>
+    </div>
+    <div id="hud">
+      <span id="connection" class="status waiting">Connecting</span>
+      <span id="title"></span>
+    </div>
+    <button id="join" hidden>Tap for sound</button>
+  </div>
+  <script src="/vendor/hls.min.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
