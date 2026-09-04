@@ -5,6 +5,11 @@
 import "media-chrome";
 
 const ICONS = {
+  link: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 13.4a1 1 0 0 1 0-1.4l2.8-2.8a1 1 0 1 1 1.4 1.4l-2.8 2.8a1 1 0 0 1-1.4 0zM7 17a3 3 0 0 1 0-4.2l2.1-2.1 1.4 1.4L8.4 14.2a1 1 0 0 0 1.4 1.4l2.1-2.1 1.4 1.4L11.2 17A3 3 0 0 1 7 17zm10-10a3 3 0 0 1 0 4.2l-2.1 2.1-1.4-1.4 2.1-2.1a1 1 0 1 0-1.4-1.4l-2.1 2.1-1.4-1.4L12.8 7A3 3 0 0 1 17 7z"/></svg>',
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
+  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>',
+  sound: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>',
+  film: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zm2 2v2h2V6zm0 4v2h2v-2zm0 4v2h2v-2zm10-8v2h2V6zm0 4v2h2v-2zm0 4v2h2v-2z"/></svg>',
   audio: '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
   subs: '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z"/></svg>',
 };
@@ -16,35 +21,33 @@ export function buildUi(root) {
       <video slot="media" playsinline crossorigin="anonymous"></video>
       <div class="hud" slot="top-chrome">
         <div class="now">
-          <div class="kicker" data-kicker>Live with the TV</div>
           <div class="title" data-title></div>
-          <div class="meta"><span class="pill warn" data-conn>Connecting</span><span class="pill quiet" data-stats hidden></span><span class="pill" data-tv hidden></span></div>
+          <div class="row"><span class="status warn" data-conn>${ICONS.link}Connecting</span><span class="status" data-tv hidden></span><span class="status" data-stats hidden></span></div>
         </div>
       </div>
       <div class="overlay" slot="centered-chrome" data-overlay>
-        <div class="brand"><i></i>Stremio Watch</div>
+        <div class="brand"><span class="brand-mark">${ICONS.play}</span>Stremio Watch</div>
         <div class="center">
-          <div class="eyebrow"><span class="beat"></span><span data-eyebrow>Standing by</span></div>
           <h1 data-ov-title>Waiting for the TV</h1>
-          <p class="lead" data-ov-body>The moment something plays on the TV, it appears here and stays in sync. Nothing to click.</p>
+          <p class="lead" data-ov-body>When the TV plays something, it appears here and stays in sync.</p>
           <div class="steps" data-steps hidden>
-            <div class="step" data-step="resolve"><span class="dot">✓</span><span>Locating the stream</span></div>
-            <div class="step" data-step="open"><span class="dot">✓</span><span>Reading tracks, subtitles and fonts</span></div>
-            <div class="step" data-step="load"><span class="dot">✓</span><span>Loading video at the TV's position</span></div>
+            <div class="step" data-step="resolve"><span class="dot">${ICONS.check}</span><span>Locating the stream</span></div>
+            <div class="step" data-step="open"><span class="dot">${ICONS.check}</span><span>Reading tracks, subtitles and fonts</span></div>
+            <div class="step" data-step="load"><span class="dot">${ICONS.check}</span><span>Loading video where the TV is</span></div>
           </div>
         </div>
         <div class="foot">
-          <div class="pills"><span class="pill warn" data-conn2>Connecting</span><span class="pill quiet" data-room></span></div>
-          <span class="hint" data-hint></span>
+          <div class="row"><span class="status warn" data-conn2>${ICONS.link}Connecting</span><span class="status" data-room hidden></span></div>
+          <div class="facts" data-facts></div>
         </div>
       </div>
-      <button class="sound" data-sound hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>Tap for sound</button>
+      <button class="sound" data-sound hidden>${ICONS.sound}Turn sound on</button>
       <media-control-bar>
         <media-time-display showduration></media-time-display>
         <media-time-range class="locked"></media-time-range>
         <media-mute-button></media-mute-button>
         <media-volume-range></media-volume-range>
-        <span class="sep"></span>
+        <span class="gap"></span>
         <media-chrome-button data-audio-btn title="Audio">${ICONS.audio}</media-chrome-button>
         <media-chrome-button data-subs-btn title="Subtitles">${ICONS.subs}</media-chrome-button>
         <media-pip-button></media-pip-button>
@@ -61,7 +64,7 @@ export function buildUi(root) {
   const q = s => root.querySelector(s);
   const el = {
     controller: q("media-controller"), video: q("video"), assLayer: q("[data-ass-layer]"), conn: q("[data-conn]"), tv: q("[data-tv]"), title: q("[data-title]"), stats: q("[data-stats]"),
-    overlay: q("[data-overlay]"), ovTitle: q("[data-ov-title]"), ovBody: q("[data-ov-body]"), eyebrow: q("[data-eyebrow]"), steps: q("[data-steps]"), conn2: q("[data-conn2]"), room: q("[data-room]"), hint: q("[data-hint]"), kicker: q("[data-kicker]"), sound: q("[data-sound]"),
+    overlay: q("[data-overlay]"), ovTitle: q("[data-ov-title]"), ovBody: q("[data-ov-body]"), steps: q("[data-steps]"), conn2: q("[data-conn2]"), room: q("[data-room]"), facts: q("[data-facts]"), sound: q("[data-sound]"),
     audioBtn: q("[data-audio-btn]"), audioMenu: q("[data-audio-menu]"), subsBtn: q("[data-subs-btn]"), subsMenu: q("[data-subs-menu]"),
   };
 
@@ -98,7 +101,9 @@ export function buildUi(root) {
     for (const it of items) {
       const b = document.createElement("button");
       b.setAttribute("role", "menuitemradio"); b.setAttribute("aria-checked", String(it.id === selectedId));
-      b.innerHTML = `<span class="check">${it.id === selectedId ? "✓" : ""}</span><span class="label">${it.label}</span>${it.sub ? `<span class="sub">${it.sub}</span>` : ""}`;
+      const full = [it.label, it.detail].filter(Boolean).join(" ");
+      b.title = full;                                                  // tooltip carries the untruncated text
+      b.innerHTML = `<span class="check">${it.id === selectedId ? ICONS.check : ""}</span><span class="label"><b>${it.label}</b>${it.detail ? `<small>${it.detail}</small>` : ""}</span>${it.tag ? `<span class="status">${it.tag}</span>` : ""}`;
       b.addEventListener("click", () => { onPick(it.id); closeMenus(); });
       menu.appendChild(b);
     }
@@ -109,12 +114,11 @@ export function buildUi(root) {
     setConnection(status) {
       const map = { connecting: ["Connecting", "warn"], connected: ["Connected", "ok"], reconnecting: ["Reconnecting", "bad"] };
       const [label, cls] = map[status] || [status, "warn"];
-      for (const p of [el.conn, el.conn2]) { p.textContent = label; p.className = `pill ${cls}`; }
+      for (const p of [el.conn, el.conn2]) { p.innerHTML = `${ICONS.link}${label}`; p.className = `status ${cls}`; }
     },
-    setKicker(text) { el.kicker.textContent = text; },
-    setEyebrow(text) { el.eyebrow.textContent = text; },
     setRoom(text) { el.room.textContent = text; el.room.hidden = !text; },
-    setHint(text) { el.hint.textContent = text || ""; },
+    // facts: [{icon, text}] rendered as spaced spans with icons (no "·" joins)
+    setFacts(items) { el.facts.innerHTML = (items || []).map(f => `<span>${ICONS[f.icon] || ""}${f.text}</span>`).join(""); },
     // stage: null (idle, steps hidden) | "resolve" | "open" | "load" | "done"
     setStage(stage) {
       const order = ["resolve", "open", "load"];
@@ -122,9 +126,9 @@ export function buildUi(root) {
       const idx = stage === "done" ? order.length : order.indexOf(stage);
       el.steps.querySelectorAll(".step").forEach((node, i) => { node.classList.toggle("done", i < idx); node.classList.toggle("active", i === idx); });
     },
-    setTv(text) { el.tv.hidden = !text; el.tv.textContent = text || ""; },
+    setTv(text, cls = "") { el.tv.hidden = !text; el.tv.textContent = text || ""; el.tv.className = `status ${cls}`; },
     setTitle(text) { el.title.textContent = text || ""; },
-    setStats(text) { el.stats.hidden = !text; el.stats.textContent = text || ""; },
+    setStats(text) { el.stats.hidden = !text; el.stats.innerHTML = text ? `${ICONS.film}${text}` : ""; },
     overlay(visible, title, body) { el.overlay.hidden = !visible; if (title != null) el.ovTitle.textContent = title; if (body != null) el.ovBody.textContent = body; },
     showSoundPrompt(show) { el.sound.hidden = !show; },
     onSound(fn) { el.sound.addEventListener("click", fn); },
