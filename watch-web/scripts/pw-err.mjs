@@ -1,0 +1,12 @@
+import { chromium } from "playwright";
+const b=await chromium.launch({headless:true});
+const p=await b.newPage({viewport:{width:1280,height:720}});
+const errs=[];
+p.on("pageerror",e=>errs.push("PAGEERR "+e.message.slice(0,200)));
+p.on("console",m=>{if(m.type()==="error")errs.push("CONSOLE "+m.text().slice(0,200))});
+await p.goto("http://127.0.0.1:3211/?room=home");
+await p.waitForTimeout(20000);
+const s=await p.evaluate(()=>{const q=x=>document.querySelector(x);return{ovTitle:q("[data-ov-title]").textContent,ovBody:q("[data-ov-body]").textContent,ovHidden:q("[data-overlay]").hidden,mime:window.__session()?.pipeline?.currentMime,sbExists:!!window.__session()?.pipeline?.sourceBuffer,msReady:window.__session()?.pipeline?.mediaSource?.readyState,buffered:window.__watch().buffered,t:window.__watch().video.t,rs:window.__watch().video.rs}});
+console.log("state:",JSON.stringify(s));
+console.log("errors:",JSON.stringify([...new Set(errs)].slice(0,8),null,1));
+await b.close();

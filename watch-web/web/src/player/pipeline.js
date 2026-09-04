@@ -1,16 +1,29 @@
-// Browser-side media pipeline: CDN bytes -> mediabunny demux -> fMP4 passthrough ->
-// MediaSource. No decoding, no server. Timestamps are the file's own, so MSE's
-// buffered ranges are real media time and a TV position maps 1:1.
+// Browser-side media pipeline: CDN bytes -> mediabunny demux -> fMP4 -> MediaSource.
+// Video and browser-native audio are COPIED (passthrough, no re-encode). The file's
+// own timestamps are kept, so MSE buffered ranges are real media time and a TV
+// position maps 1:1. Dolby/DTS audio, which no browser can decode, is decoded via a
+// mediabunny extension and re-encoded to Opus in-browser (the only track that costs
+// CPU, and audio is cheap).
 import {
-  Input, Output, MATROSKA, Mp4OutputFormat, AppendOnlyStreamTarget, StreamSource,
-  EncodedPacketSink, EncodedVideoPacketSource, EncodedAudioPacketSource,
+  Input, Output, MATROSKA, Mp4OutputFormat, AppendOnlyStreamTarget, StreamSource, canEncodeAudio,
+  EncodedPacketSink, EncodedVideoPacketSource, EncodedAudioPacketSource, AudioSampleSink, AudioSampleSource,
 } from "mediabunny";
+import { registerAc3Decoder } from "@mediabunny/ac3";
+import { registerDtsDecoder } from "@mediabunny/dts";
 import { ByteSource } from "../net/byte-source.js";
+
+registerAc3Decoder();   // AC-3 + E-AC-3
+registerDtsDecoder();   // DTS (incl. DTS-HD core)
 
 const AHEAD_SECONDS = 90;      // don't mux more than this ahead of the playhead
 const BEHIND_SECONDS = 45;     // evict buffer older than this
+const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
+const OPUS_BITRATE = 256_000;
 
 function mime(v, a) { return `video/mp4; codecs="${[v, a].filter(Boolean).join(", ")}"`; }
+
+let opusOk = null;
+async function opusEncodable() { if (opusOk == null) opusOk = await canEncodeAudio("opus", { numberOfChannels: 2, sampleRate: 48000 }).catch(() => false); return opusOk; }
 
 export class Pipeline {
   constructor(video, { onTracks, onStatus, onError } = {}) {
@@ -41,11 +54,14 @@ export class Pipeline {
 
     const vCodec = await video.getCodecParameterString();
     const vOk = vCodec ? MediaSource.isTypeSupported(mime(vCodec)) : false;
+    const opus = await opusEncodable();
     const audioInfos = [];
     for (const a of audios) {
-      const codec = await a.getCodecParameterString();
-      const ok = codec ? MediaSource.isTypeSupported(mime(vCodec || "avc1.640028", codec)) : false;
-      audioInfos.push({ id: a.id, track: a, codec: a.codec, codecString: codec, language: a.languageCode, name: a.name, channels: a.numberOfChannels, playable: ok, isDefault: Boolean(a.disposition?.default) });
+      const codecString = await a.getCodecParameterString().catch(() => null);
+      const direct = codecString ? MediaSource.isTypeSupported(mime(vCodec || "avc1.640028", codecString)) : false;
+      const transcode = !direct && TRANSCODABLE.has(a.codec) && opus;
+      audioInfos.push({ id: a.id, track: a, codec: a.codec, codecString, language: a.languageCode, name: a.name, channels: a.numberOfChannels,
+        playable: direct || transcode, direct, transcode, isDefault: Boolean(a.disposition?.default) });
     }
     this.tracks = {
       video: { track: video, codec: video.codec, codecString: vCodec, playable: vOk, width: video.displayWidth, height: video.displayHeight, hdr: await video.hasHighDynamicRange().catch(() => false) },
@@ -68,7 +84,8 @@ export class Pipeline {
     await this._cancelRun();
     this.selectedAudioId = audioId;
     const audio = this.tracks.audios.find(a => a.id === audioId) || null;
-    const codecs = mime(this.tracks.video.codecString, audio?.codecString);
+    const audioMime = audio ? (audio.transcode ? "opus" : audio.codecString) : null;
+    const codecs = mime(this.tracks.video.codecString, audioMime);
 
     if (!this.mediaSource) {
       this.mediaSource = new MediaSource();
@@ -85,7 +102,7 @@ export class Pipeline {
     }
     this.currentMime = codecs;
 
-    const run = { cancelled: false, output: null, startAt, audioId };
+    const run = { cancelled: false, output: null, startAt, audioId, nv: 0, na: 0, stage: "init", transcode: Boolean(audio?.transcode) };
     this.run = run;
     const writable = new WritableStream({ write: chunk => this._append(chunk) });
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: "fragmented", minimumFragmentDuration: 1 }), target: new AppendOnlyStreamTarget(writable) });
@@ -94,43 +111,67 @@ export class Pipeline {
     const vSrc = new EncodedVideoPacketSource(this.tracks.video.codec);
     output.addVideoTrack(vSrc);
     let aSrc = null;
-    if (audio) { aSrc = new EncodedAudioPacketSource(audio.codec); output.addAudioTrack(aSrc); }
+    if (audio) {
+      // WebCodecs Opus only encodes mono/stereo, so downmix 5.1/7.1 to stereo.
+      aSrc = audio.transcode
+        ? new AudioSampleSource({ codec: "opus", bitrate: OPUS_BITRATE, transform: { numberOfChannels: 2, sampleRate: 48000 } })
+        : new EncodedAudioPacketSource(audio.codec);
+      output.addAudioTrack(aSrc);
+    }
     await output.start();
 
     this.onStatus?.({ phase: "muxing", startAt });
-    void this._feed(run, vSrc, aSrc, audio?.track || null, startAt).catch(e => { if (!run.cancelled) this.onError?.(e); });
+    void this._feed(run, vSrc, aSrc, audio, startAt).catch(e => { if (!run.cancelled) this.onError?.(e); });
   }
 
-  async _feed(run, vSrc, aSrc, audioTrack, startAt) {
+  async _feed(run, vSrc, aSrc, audio, startAt) {
     const v = this.tracks.video.track;
     const vSink = new EncodedPacketSink(v);
     const vKey = (await vSink.getKeyPacket(startAt)) || (await vSink.getFirstKeyPacket());
     if (!vKey) throw new Error("No keyframe found");
     const vCfg = await v.getDecoderConfig();
-    const aSink = audioTrack ? new EncodedPacketSink(audioTrack) : null;
-    const aCfg = audioTrack ? await audioTrack.getDecoderConfig() : null;
-    let aPacket = aSink ? ((await aSink.getPacket(vKey.timestamp)) || (await aSink.getFirstPacket())) : null;
+
+    // Audio: passthrough (encoded packets) or transcode (decoded samples -> Opus).
+    const aTrack = audio?.track || null;
+    const transcode = Boolean(audio?.transcode);
+    const packetSink = aTrack && !transcode ? new EncodedPacketSink(aTrack) : null;
+    const aCfg = packetSink ? await aTrack.getDecoderConfig() : null;
+    let aPacket = packetSink ? ((await packetSink.getPacket(vKey.timestamp)) || (await packetSink.getFirstPacket())) : null;
+    run.stage = "audio-init";
+    const sampleIter = aTrack && transcode ? new AudioSampleSink(aTrack).samples(vKey.timestamp) : null;
+    let aSample = sampleIter ? (await sampleIter.next()).value || null : null;
+    run.stage = "feeding";
     let nv = 0, na = 0;
+
     const throttle = async () => {
-      // keep no more than AHEAD_SECONDS muxed past the playhead
       while (!run.cancelled) {
         const end = this._bufferedEnd();
         if (end == null || end - this.video.currentTime < AHEAD_SECONDS) return;
         await new Promise(r => setTimeout(r, 250));
       }
     };
+    const pumpAudioTo = async ts => {
+      if (packetSink) {
+        while (aPacket && aPacket.timestamp <= ts && !run.cancelled) {
+          await aSrc.add(aPacket, na === 0 ? { decoderConfig: aCfg } : undefined); na++; run.na = na;
+          aPacket = await packetSink.getNextPacket(aPacket);
+        }
+      } else if (sampleIter) {
+        while (aSample && aSample.timestamp <= ts && !run.cancelled) {
+          run.stage = 'encode'; await aSrc.add(aSample); na++; run.na = na; run.stage = 'feeding'; aSample.close?.();
+          aSample = (await sampleIter.next()).value || null;
+        }
+      }
+    };
+
     for await (const p of vSink.packets(vKey)) {
       if (run.cancelled) break;
-      await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++;
-      // interleave audio up to this video timestamp
-      while (aPacket && aPacket.timestamp <= p.timestamp + 0.5 && !run.cancelled) {
-        await aSrc.add(aPacket, na === 0 ? { decoderConfig: aCfg } : undefined); na++;
-        aPacket = await aSink.getNextPacket(aPacket);
-      }
+      await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++; run.nv = nv;
+      await pumpAudioTo(p.timestamp + 0.5);
       if ((nv & 7) === 0) { await throttle(); this._evict(); }
     }
     if (run.cancelled) return;
-    while (aPacket) { await aSrc.add(aPacket, na === 0 ? { decoderConfig: aCfg } : undefined); na++; aPacket = await aSink.getNextPacket(aPacket); }
+    await pumpAudioTo(Infinity);
     await run.output.finalize();
     if (!run.cancelled && this.mediaSource.readyState === "open") { await this._whenIdle(); try { this.mediaSource.endOfStream(); } catch {} }
     this.onStatus?.({ phase: "complete" });
