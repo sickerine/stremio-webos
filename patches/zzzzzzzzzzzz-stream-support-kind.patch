@@ -1,0 +1,35 @@
+--- details.chunk.js	2026-09-05 19:21:38
++++ details.chunk.js	2026-09-05 19:21:38
+@@ -249,14 +249,14 @@
+                     t: a
+                 } = (0, m.B)(), d = (0, v.Vj)(), {
+                     metaDetails: g
+-                } = (0, o.gK)(), [h, f] = (0, s.ok)(), [p, b] = (0, i.n5)(null !== (n = h().addon) && void 0 !== n ? n : null), [x, y] = (0, i.n5)(parseInt(null !== (t = h().stream) && void 0 !== t ? t : "0")), [__kv, __ks] = (0, i.n5)(window.__animeStreamKind ? window.__animeStreamKind() : "all"), __isKitsu = () => {
++                } = (0, o.gK)(), [h, f] = (0, s.ok)(), [p, b] = (0, i.n5)(null !== (n = h().addon) && void 0 !== n ? n : null), [x, y] = (0, i.n5)(parseInt(null !== (t = h().stream) && void 0 !== t ? t : "0")), [__kv, __ks] = (0, i.n5)(window.__streamKindFor ? window.__streamKindFor() : "all"), __isKitsu = () => {
+                     try { return /kitsu(:|%3A)\d+/i.test(location.hash || "") } catch (e) { return !1 }
+                 }, __kSet = e => {
+-                    window.__setAnimeStreamKind && window.__setAnimeStreamKind(e), __ks(e)
++                    window.__setStreamKindFor && window.__setStreamKindFor(e), __ks(e)
+                 }, __refresh = () => {
+                     y(null), y(0);
+                     return e.onRefresh()
+-                }, w = () => ((window.__sortAnimeStreams ? window.__sortAnimeStreams(__w0(), __kv()) : __w0())).slice(0, (x() || 0) + 5), __w0 = () => {
++                }, w = () => ((window.__applyStreamKind ? window.__applyStreamKind(__w0(), __kv()) : __w0())).slice(0, (x() || 0) + 5), __w0 = () => {
+                     var n;
+                     return e.addonsStreams.filter((({
+                         addon: e
+@@ -298,12 +298,12 @@
+                     get children() {
+                         return [(0, i.a0)(i.wv, {
+                             get when() {
+-                                return __isKitsu()
++                                return !0
+                             },
+                             get children() {
+                                 return (0, i.a0)(l.l6, {
+                                     get options() {
+-                                        return [{
++                                        return window.__streamKindOptions ? window.__streamKindOptions(__kv()) : [{
+                                             value: "all",
+                                             label: "All",
+                                             selected: "all" === __kv()
