@@ -1,6 +1,6 @@
---- video.chunk.js	2026-09-05 20:53:52
-+++ video.chunk.js	2026-09-05 20:53:52
-@@ -21094,9 +21094,31 @@
+--- video.chunk.js	2026-09-05 21:11:56
++++ video.chunk.js	2026-09-05 21:11:56
+@@ -21094,9 +21094,34 @@
                      G("buffering"), G("buffered")
                  }, A.onloadeddata = function() {
                      G("buffering"), G("buffered")
@@ -8,9 +8,11 @@
 -                setTimeout(function() {
 -                    if (A.audioTracks && A.audioTracks.length > 0) {
 +                }, A.__nativeAudioInit = function() {
++                    var __alog = function(m) { try { (window.__audioLog = window.__audioLog || []).push(new Date().toISOString().slice(11, 23) + ' ' + m); if (window.__audioLog.length > 60) window.__audioLog.shift(); } catch (e) {} };
 +                    // Same dance the audio menu uses: webOS accepts enabled/selectTrack but keeps
 +                    // decoding the old track once started, so reset src and seek back.
 +                    var __switchNativeAudio = function(__idx) {
++                        __alog('switch -> ' + __idx + ' (t=' + A.currentTime.toFixed(1) + ' paused=' + A.paused + ')');
 +                        try { for (var __k = 0; __k < A.audioTracks.length; __k++) A.audioTracks[__k].enabled = (__k === __idx); } catch (e) {}
 +                        v = "EMBEDDED_" + __idx;
 +                        T.forEach(function(track, i) { track.mode = i === __idx ? "showing" : "disabled"; });
@@ -32,10 +34,21 @@
 +                    // tracks existed before the listener attached: no audio menu, no language
 +                    // preference, LG default (often the commentary track).
 +                    if (A.audioTracks && A.audioTracks.length > 0 && (T || []).length !== A.audioTracks.length) {
++                        __alog('init: native tracks=' + A.audioTracks.length + ' ' + Array.from(A.audioTracks).map(function(e) { return (e.language || '?') + ':' + (e.label || '') + (e.enabled ? '*' : ''); }).join(' | '));
                          T = [];
                          Array.from(A.audioTracks).forEach(function(e, t) {
                              T.push({
-@@ -21127,6 +21149,13 @@
+@@ -21114,7 +21139,9 @@
+                         // Native label wins when present so we don't downgrade rich titles
+                         // ("English (Director's Commentary)") to bare language codes.
+                         if (D && D.url) {
++                            __alog('tracks probe: ' + String(D.url).slice(0, 60));
+                             o(D.url, function(trackData) {
++                                __alog('tracks probe result: ' + (trackData && trackData.audio ? trackData.audio.length + ' audio: ' + trackData.audio.map(function(a) { return (a.lang || '?') + ':' + (a.label || '') + ':' + (a.codec || ''); }).join(' | ') : 'none'));
+                                 if (trackData && trackData.audio && trackData.audio.length) {
+                                     T.forEach(function(track, i) {
+                                         for (var j = 0; j < trackData.audio.length; j++) {
+@@ -21127,6 +21154,14 @@
                                          }
                                      });
                                      G("audioTracks");
@@ -43,13 +56,14 @@
 +                                        if (window.AudioPick) {
 +                                            var __cur = -1; for (var __c = 0; __c < A.audioTracks.length; __c++) if (A.audioTracks[__c].enabled) { __cur = __c; break; }
 +                                            var __alt = window.AudioPick.repick(T.map(function(t) { return { lang: t.lang, label: t.label }; }), __set, __cur);
++                                            __alog('repick: current=' + __cur + ' labels=' + T.map(function(t) { return t.lang + ':' + (t.label || ''); }).join(' | ') + ' -> ' + __alt);
 +                                            if (__alt >= 0) __switchNativeAudio(__alt);
 +                                        }
 +                                    } catch (e) {}
                                  }
                              });
                          }
-@@ -21134,7 +21163,8 @@
+@@ -21134,10 +21169,12 @@
                          var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || /^(kitsu|mal|anilist|anidb):/i.test(__id)) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
                          var __wantJa = __set.indexOf("ja") >= 0;
                          var prefIdx = -1;
@@ -59,7 +73,11 @@
                              var tl = (A.audioTracks[ai].language || "").toLowerCase(), lb = (A.audioTracks[ai].label || "").toLowerCase();
                              if (__set.indexOf(tl) >= 0 || __set.indexOf(tl.substring(0, 2)) >= 0 || (__wantJa ? lb.indexOf("japan") >= 0 : lb.indexOf("english") >= 0)) { prefIdx = ai; break; }
                          }
-@@ -21149,9 +21179,11 @@
++                        __alog('pick: want=' + __set.join(',') + ' -> ' + prefIdx + (window.AudioPick ? '' : ' (no AudioPick)'));
+                         if (prefIdx >= 0) {
+                             for (var aj = 0; aj < A.audioTracks.length; aj++) A.audioTracks[aj].enabled = (aj === prefIdx);
+                             v = "EMBEDDED_" + prefIdx;
+@@ -21149,9 +21186,11 @@
                          G("audioTracks");
                          G("selectedAudioTrackId");
                      }
