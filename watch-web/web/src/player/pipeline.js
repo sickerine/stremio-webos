@@ -60,8 +60,14 @@ export class Pipeline {
     const audioInfos = [];
     for (const a of audios) {
       const codecString = await a.getCodecParameterString().catch(() => null);
-      const direct = codecString ? MediaSource.isTypeSupported(mime(vCodec || "avc1.640028", codecString)) : false;
-      const transcode = !direct && TRANSCODABLE.has(a.codec) && opus;
+      // MSE claims to support a codec string regardless of channel count, but Chromium's
+      // fMP4 parser fails on >2ch AAC/FLAC passthrough (CHUNK_DEMUXER_ERROR_APPEND_FAILED).
+      // So only pass through <=2ch directly; downmix anything wider to stereo Opus, the
+      // same path Dolby/DTS already use. `supported` implies WebCodecs can decode it too.
+      const supported = codecString ? MediaSource.isTypeSupported(mime(vCodec || "avc1.640028", codecString)) : false;
+      const ch = a.numberOfChannels || 2;
+      const direct = supported && ch <= 2;
+      const transcode = !direct && opus && (TRANSCODABLE.has(a.codec) || supported);
       audioInfos.push({ id: a.id, track: a, codec: a.codec, codecString, language: a.languageCode, name: a.name, channels: a.numberOfChannels,
         playable: direct || transcode, direct, transcode, isDefault: Boolean(a.disposition?.default) });
     }
