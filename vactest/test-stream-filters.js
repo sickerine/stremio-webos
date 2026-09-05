@@ -69,6 +69,9 @@ const CURATED = [
     ['Movie 2010 1080p BluRay x264 DTS:X 7.1', true, false, 'unsupported'],
     ['Movie 2010 1080p BluRay x264 DTSX', true, false, 'unsupported'],
     ['Movie.2010.1080p.BluRay.DTS-ES.6.1.x264', true, false, 'unsupported'],
+    ['Oppenheimer.2023.IMAX.German.DTSD.DL.2160p.UHD.BluRay.HDR.HEVC.Remux-QfG', true, false, 'unsupported'],   // DTSD: German DTS dub tag
+    ['Movie 2020 1080p WEB Dolby Digital Plus 5.1', false, true, 'supported'],
+    ['Movie.2020.1080p.x265.NF.DDP5.1', false, true, 'supported'],
     ['Movie.2010.1080p.BluRay.TrueHD7.1.x264', true, false, 'unsupported'],
     ['Movie.2010.1080p.BluRay.True-HD.5.1.x264', true, false, 'unsupported'],
     ['Lincredibile Hulk (2008) UHDRip 2160p HEVC HDR ITA DTS ENG DTS-X 7.1 PirateMKV.mkv', false, false, 'unsupported'],
@@ -119,17 +122,66 @@ const CURATED = [
     ['Dolby.Vision.Demo.2160p.x265-GROUP', false, false, 'unknown'],
     ['Movie 2020 1080p WEB-DL H264 AAC 2.0 [HDTV]', false, true, 'supported'],
     ['Movie.2020.1080p.HDTV.x264-GROUP', false, false, 'unknown'],
+    // --- FALSE POSITIVES: title words and substrings that must NOT trigger a rule
+    ['Charlottes.Web.2006.1080p.HDTV.x264-GROUP', false, false, 'unknown'],           // "Web" before a year is a title
+    ['Charlottes.Web.2006.1080p.WEB-DL.DDP5.1.H.264-GROUP', false, true, 'supported'],  // ...but a real WEB-DL still counts
+    ['Charlottes.Web.2006.2160p.AMZN.WEB-DL.x265.10bit.HDR10Plus.DTS-HD.MA.5.1-NOGRP', false, true, 'unsupported'],
+    ['Opus (2025) 1080p WEBRip x264-GROUP', false, true, 'unknown'],                    // "Opus" is the film, not the codec
+    ['Opus 2025 2160p WEBRip', false, true, 'unknown'],
+    ['Opus.2025.Hybrid.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos.H265-AOC', false, true, 'supported'],
+    ['Mr Hollands Opus 1995 1080p BluRay x264-OFT', true, false, 'unknown'],
+    ['Mr Hollands Opus 1995 BluRay 1080p DTS-HD MA 5 1 AVC REMUX-FraMeSToR', true, false, 'unsupported'],
+    ['Redux Redux 2025 2160p WEBRip', false, true, 'unknown'],                          // Redux is not Remux
+    ['Aria-Remix (2026) 1080p WEB-DL H.264', false, true, 'unknown'],                   // Remix is not Remux
+    ['Remuxed.Memories.2020.1080p.HDTV.x264', false, false, 'unknown'],                 // Remuxed (letter follows) is not Remux
+    ['BDSM.The.Documentary.2019.1080p.HDTV.x264', false, false, 'unknown'],             // BD followed by letters
+    ['The.Abduction.2011.1080p.HDTV.x264', false, false, 'unknown'],                    // "bd" inside a word
+    ['Abduction (2011) 1080p-H264-AC 3 (DTS 5.1) & nickarad', false, false, 'supported'], // spaced AC 3 is Dolby; DTS beside it does not veto
+    ['Blurr.2022.1080p.HDTV.x264', false, false, 'unknown'],                            // Blur is not Blu-ray
+    ['Attack.of.the.Giant.Blurry.Finger.2021.1080p.WEB-DL.AAC2.0', false, true, 'supported'],
+    ['Bluey.S01E01.1080p.HDTV.x264', false, false, 'unknown'],
+    ['The.Bluey.Movie.2027.2160p.DSNP.WEB-DL.DDP5.1.Atmos.H.265', false, true, 'supported'],
+    ['Isaac.Asimovs.Foundation.S01E01.1080p.HDTV.x264', false, false, 'unknown'],       // "aac" inside Isaac
+    ['Upcoming.Storm.2021.1080p.HDTV.x264', false, false, 'unknown'],                   // "pcm" inside Upcoming
+    ['Cruella.2021.1080p.HDTV.x264', false, false, 'unknown'],                          // "cr" inside Cruella
+    ['Confidential.Report.2019.1080p.HDTV.x264', false, false, 'unknown'],              // "nf" inside Confidential
+    ['Landtsmen.2020.1080p.HDTV.x264', false, false, 'unknown'],                        // "dts" inside a word
+    ['Daddys.Home.2015.1080p.HDTV.x264', false, false, 'unknown'],                      // "dd" inside Daddy
+    ['Daddys.Home.2015.1080p.BluRay.DTS.x264-ETRG', true, false, 'unsupported'],        // ...and a real DTS rip of it
+    ['Crash.2004.DC.1080p.HDTV.x264', false, false, 'unknown'],
+    ['Crash 2004 V1 FRA DC BluRay Remux AVC 1080p DTS-HDMA5.1-DreamHD', true, false, 'unsupported'],
+    ['My.Little.Pony.A.New.Generation.2021.1080p.NF.WEB-DL.DDP5.1.Atmos.x264', false, true, 'supported'],
+    ['Dune.2021.Trailer.WEB', false, false, 'unknown'],                                 // bare WEB with nothing glued to it is not a source tag
+    // --- Atmos with no carrier: source decides
+    ['Blade Runner 2049 OPEN MATTE V2 (2017) 1080p Atmos KK650 Regraded', false, false, 'unknown'],
+    ['Blade Runner 2049 2017.MULTi.UHD.2160p.Blu-ray.HDR.ATMOS.7.1.HEVC-DDR', true, false, 'unsupported'],
+    ['Dune (2021) (2160p x265 10bit HDR UHD BD Atmos) [Prof]', true, false, 'unsupported'],
+    ['Movie.2020.2160p.WEB-DL.Atmos.x265', false, true, 'supported'],
+    // --- more BD spellings
+    ['Cowboy Bebop (1998) [COMPLETA] [1080p.x264.FLAC.ITA.JPN] [BDMux] [175.2GB] [stress]', true, false, 'supported'],
+    ['[JySzE] [SoM] Cowboy Bebop [v2] [ITBD] [VFR] [Dual Audio] [Complete] [x264]', true, false, 'unknown'],
+    ['[philosophy-raws][COWBOY BEBOP][TV 01-26+Movie+SP]][BDRIP][1080p 10bit]', true, false, 'unknown'],
+    // --- web encoder groups: web unless BD-marked
+    ['[Sokudo] Frieren: Beyond Journey\'s End S01 [1080p EAC3 AV1][multi sub][dual audio]', false, true, 'supported'],
+    ['[Sokudo] Cowboy Bebop [1080p BD][AV1][dual audio]', true, false, 'unknown'],
+    ['[Breeze] Frieren: Beyond Journey\'s End S01 [1080p EAC3 AV1][multi sub][dual audio]', false, true, 'supported'],
+    ['[Cleo] Cowboy Bebop [Dual Audio 10bit BD720p]', true, false, 'unknown'],
+    ['[Cleo] Jujutsu Kaisen [Dual Audio 10bit 1080p][HEVC-x265]', false, true, 'unknown'],
+    ['[Dubs-Empire] Jujitsu Kaisen S01 v3 [1080p][WEB-CR][HEVC][Multi-Dub][Multi-Sub]', false, true, 'unknown'],
+    ['[Furretar] 台粤配 - 进击的巨人 (Attack on Titan) (Season 1-4) (Mandarin Chinese + Cantonese Dub)', false, false, 'unknown'],
+    ['[Exiled-Destiny] Attack On Titan [Dual Audio]', false, false, 'unknown'],
 ];
 for (const [t, bd, seasonal, support] of CURATED) { expect(t, 'bd', bd); expect(t, 'seasonal', seasonal); expect(t, 'support', support); }
 
 // ---------------------------------------------------------------- 2. generated
 // Tokens with their KNOWN category; the expectation is built from the category,
 // so this exercises boundaries/separators/casing/digits rather than the regex.
-const OK_TOKENS   = ['DDP5.1', 'DDP', 'DD5.1', 'DD+5.1', 'DD+7.1', 'DDPA5.1', 'AC3', 'AC-3', 'EAC3', 'E-AC-3', 'AAC', 'AAC2.0', 'HE-AAC', 'FLAC', 'Opus', 'MP3', 'PCM', 'LPCM', 'Dolby Digital', 'Dolby.Digital.Plus'];
-const NO_TOKENS   = ['DTS', 'DTS5.1', 'DTS-HD', 'DTS-HD.MA', 'DTS-HD MA 7.1', 'DTS-HDMA', 'DTS:X', 'DTS-X', 'DTSX', 'DTS-ES', 'TrueHD', 'TrueHD7.1', 'True-HD', 'TrueHD.Atmos', 'TrueHD 7.1 Atmos'];
+const OK_TOKENS   = ['DDP5.1', 'DDP', 'DD5.1', 'DD 5.1', 'DD+5.1', 'DD+ 5.1', 'DD+7.1', 'DDPA5.1', 'AC3', 'AC-3', 'AC 3', 'AC3.5.1', 'EAC3', 'E-AC-3', 'E AC 3', 'E-AC3', 'AAC', 'AAC2.0', 'AAC 2.0', 'HE-AAC', 'FLAC', 'FLAC5.1', 'Opus', 'Opus 2.0', 'MP3', 'PCM', 'LPCM', 'Dolby Digital', 'Dolby.Digital.Plus', 'Dolby Digital 5.1'];
+const ATMOS_ALONE = ['Atmos', 'ATMOS 7.1', 'Dolby Atmos'];
+const NO_TOKENS   = ['DTS', 'DTS5.1', 'DTS 5.1', 'DTS-HD', 'DTS-HD.MA', 'DTS-HD MA 7.1', 'DTS HD MA 5 1', 'DTS-HDMA', 'DTS-HDMA5.1', 'DTS:X', 'DTS-X', 'DTSX', 'DTS-ES', 'TrueHD', 'TrueHD7.1', 'True-HD', 'TrueHD.Atmos', 'TrueHD 7.1 Atmos'];
 const NONE_TOKENS = ['5.1', '7.1', 'Dual Audio', 'MULTi', 'DV', 'HDR10', 'HDR', 'DoVi'];
-const BD_SRC   = ['BluRay', 'Blu-ray', 'Bluray', 'BDRip', 'BDRemux', 'BD Remux', 'BD-Remux', 'REMUX', 'BDMV', 'BRRip', 'BD1080p', 'UHD.BluRay', 'JPBD'];
-const WEB_SRC  = ['WEB-DL', 'WEBDL', 'WEBRip', 'WEB', 'AMZN.WEB-DL', 'NF.WEB-DL', 'DSNP.WEB-DL', 'HIDIVE', 'CR', 'B-Global', 'BILI'];
+const BD_SRC   = ['BluRay', 'Blu-ray', 'Bluray', 'BDRip', 'BDRips', 'BDRemux', 'BD Remux', 'BD-Remux', 'REMUX', 'BDMV', 'BDMux', 'BRRip', 'BDR', 'BD1080p', 'UHD.BluRay', 'JPBD', 'ITBD', 'USBD', 'FullBluRay'];
+const WEB_SRC  = ['WEB-DL', 'WEBDL', 'WEBRip', 'WEB 1080p', 'AMZN.WEB-DL', 'NF.WEB-DL', 'DSNP.WEB-DL', 'HIDIVE', 'CR.WEB-DL', '[CR]', 'B-Global', 'BILI', 'HMAX.WEB-DL', 'ATVP.WEB-DL'];
 const NEUTRAL_SRC = ['HDTV', 'UHDRip', '2160p', '1080p'];
 const SEPS = ['.', ' ', '_', '-'];
 const CASES = [s => s, s => s.toLowerCase(), s => s.toUpperCase()];
@@ -144,9 +196,13 @@ function gen(src, srcKind, tok, tokKind) {
         expect(title, 'support', want);
     }
 }
-for (const src of BD_SRC)      { for (const t of OK_TOKENS) gen(src, 'bd', t, 'ok'); for (const t of NO_TOKENS) gen(src, 'bd', t, 'no'); for (const t of NONE_TOKENS) gen(src, 'bd', t, 'none'); }
-for (const src of WEB_SRC)     { for (const t of OK_TOKENS) gen(src, 'web', t, 'ok'); for (const t of NO_TOKENS) gen(src, 'web', t, 'no'); for (const t of NONE_TOKENS) gen(src, 'web', t, 'none'); }
-for (const src of NEUTRAL_SRC) { for (const t of OK_TOKENS) gen(src, 'none', t, 'ok'); for (const t of NO_TOKENS) gen(src, 'none', t, 'no'); for (const t of NONE_TOKENS) gen(src, 'none', t, 'none'); }
+for (const src of BD_SRC)      { for (const t of ATMOS_ALONE) gen(src, 'bd', t, 'no'); for (const t of OK_TOKENS) gen(src, 'bd', t, 'ok'); for (const t of NO_TOKENS) gen(src, 'bd', t, 'no'); for (const t of NONE_TOKENS) gen(src, 'bd', t, 'none'); }
+for (const src of WEB_SRC)     { for (const t of ATMOS_ALONE) gen(src, 'web', t, 'ok'); for (const t of OK_TOKENS) gen(src, 'web', t, 'ok'); for (const t of NO_TOKENS) gen(src, 'web', t, 'no'); for (const t of NONE_TOKENS) gen(src, 'web', t, 'none'); }
+for (const src of NEUTRAL_SRC) { for (const t of ATMOS_ALONE) gen(src, 'none', t, 'none'); for (const t of OK_TOKENS) gen(src, 'none', t, 'ok'); for (const t of NO_TOKENS) gen(src, 'none', t, 'no'); for (const t of NONE_TOKENS) gen(src, 'none', t, 'none'); }
+// title words: a codec-looking word right before the year is a title, never a codec
+for (const w of ['Opus', 'Flac', 'Aac', 'Dts', 'Atmos', 'Pcm']) for (const sep of SEPS) { generated++; expect(['Mr', 'Hollands', w, '1995', '1080p', 'HDTV', 'x264-GROUP'].join(sep), 'support', 'unknown'); }
+// substrings inside ordinary words never register
+for (const w of ['Isaac', 'Upcoming', 'Cruella', 'Confidential', 'Landtsmen', 'Daddys', 'Abduction', 'BDSM', 'Blurry', 'Remuxed', 'Webster', 'Crash', 'Bluey']) { generated += 3; expect(`${w}.2020.1080p.HDTV.x264-GROUP`, 'bd', false); expect(`${w}.2020.1080p.HDTV.x264-GROUP`, 'seasonal', false); expect(`${w}.2020.1080p.HDTV.x264-GROUP`, 'support', 'unknown'); }
 // mixed: a decodable track next to an undecodable one is playable
 for (const no of NO_TOKENS) for (const ok of OK_TOKENS) { generated++; expect(`Movie.2020.2160p.BluRay.${no}.${ok}.x265-GROUP`, 'support', 'supported'); }
 
@@ -176,7 +232,26 @@ const anchors = [
     ['hulk-movie', 'gerald99', 'support', 'supported'], ['hulk-movie', 'BDRemux Ita Eng x265-NAHOM', 'bd', true],
     ['slime-s4e21', '[SubsPlease]', 'seasonal', true], ['slime-s4e21', '[SubsPlease]', 'bd', false], ['slime-s4e21', '[Erai-raws]', 'seasonal', true],
     ['ironman-movie', 'TrueHD.7.1.Atmos-TERMiNAL', 'support', 'unsupported'],
+    ['opus-2025', 'Opus 2025 2160p WEBRip', 'support', 'unknown'], ['opus-2025', 'Opus 2025 2160p WEBRip', 'seasonal', true],
+    ['opus-2025', 'DDP5.1.Atmos.H265-AOC', 'support', 'supported'],
+    ['mr-hollands-opus', 'BluRay x264-OFT', 'bd', true], ['mr-hollands-opus', 'BluRay x264-OFT', 'support', 'unknown'],
+    ['redux-redux', 'Redux Redux 2025 2160p WEBRip', 'bd', false],
+    ['abduction-2011', 'AC 3 (DTS 5.1)', 'support', 'supported'],
+    ['cowboy-bebop-e1', '[BDMux]', 'bd', true], ['cowboy-bebop-e1', '[ITBD]', 'bd', true],
+    ['aot-s1e1', '[Furretar]', 'seasonal', false], ['aot-s1e1', '[Furretar]', 'bd', false],
+    ['frieren-s1e1', '[Sokudo]', 'seasonal', true], ['frieren-s1e1', '[Breeze]', 'seasonal', true],
+    ['charlottes-web', 'AMZN.WEB-DL', 'seasonal', true],
 ];
+// trap lists: every "unsupported" must carry a real DTS/TrueHD/Hi10 token, and every
+// "supported" a real decodable token that is not a title word before the year
+for (const name of ['charlottes-web', 'crash-2004', 'abduction-2011', 'daddys-home', 'bluey-s1e1', 'mlp-fim-s1e1', 'opus-2025', 'mr-hollands-opus', 'redux-redux']) {
+    if (!corpus[name]) continue;
+    for (const s of corpus[name]) {
+        const t = F.text(s), sup = F.support(t);
+        if (sup === 'unsupported') { checks++; if (!/dts|true-?hd|hi10|10-?bit[ ._-]?(x264|h\.?264|avc)|(x264|h\.?264|avc)[ ._-]?10-?bit/i.test(t)) failures.push(`trap ${name}: unsupported without a DTS/TrueHD/Hi10 token | ${t.slice(0, 90)}`); }
+        if (sup === 'supported') { checks++; const body = t.replace(/(opus|flac|aac|pcm|mp3|dd|dts|atmos)[ ._(-]*(19|20)\d\d/ig, ''); if (!/(^|[^a-z0-9])(ddp?a?(?![a-z])|dd\+|e[ ._-]?ac[ ._-]?3|eac3|ac[ ._-]?3|dolby[ ._-]?digital|aac|flac|opus|vorbis|mp3|l?pcm|atmos)/i.test(body)) failures.push(`trap ${name}: supported without a decodable token | ${t.slice(0, 90)}`); }
+    }
+}
 for (const [name, needle, field, want] of anchors) { const s = find(name, needle); checks++; if (!s) { failures.push(`corpus ${name}: anchor not found: ${needle}`); continue; } expect(F.text(s), field, want); }
 
 // ---------------------------------------------------------------- chip plumbing
