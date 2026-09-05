@@ -1,0 +1,75 @@
+--- video.chunk.js	2026-09-05 20:53:52
++++ video.chunk.js	2026-09-05 20:53:52
+@@ -21094,9 +21094,31 @@
+                     G("buffering"), G("buffered")
+                 }, A.onloadeddata = function() {
+                     G("buffering"), G("buffered")
+-                }, A.audioTracks && A.audioTracks.addEventListener && A.audioTracks.addEventListener("addtrack", function() {
+-                setTimeout(function() {
+-                    if (A.audioTracks && A.audioTracks.length > 0) {
++                }, A.__nativeAudioInit = function() {
++                    // Same dance the audio menu uses: webOS accepts enabled/selectTrack but keeps
++                    // decoding the old track once started, so reset src and seek back.
++                    var __switchNativeAudio = function(__idx) {
++                        try { for (var __k = 0; __k < A.audioTracks.length; __k++) A.audioTracks[__k].enabled = (__k === __idx); } catch (e) {}
++                        v = "EMBEDDED_" + __idx;
++                        T.forEach(function(track, i) { track.mode = i === __idx ? "showing" : "disabled"; });
++                        try { if (A.mediaId) l({ method: "selectTrack", parameters: { type: "audio", mediaId: A.mediaId, index: __idx }}); } catch (e) {}
++                        if (A.currentTime > 0 || !A.paused) {
++                            try {
++                                var __t0 = A.currentTime, __wasPaused = A.paused; A.pause();
++                                var __src = A.src; A.removeAttribute("src"); A.load(); A.src = __src;
++                                A.addEventListener("loadedmetadata", function __once() {
++                                    A.removeEventListener("loadedmetadata", __once);
++                                    try { for (var __kk = 0; __kk < A.audioTracks.length; __kk++) A.audioTracks[__kk].enabled = (__kk === __idx); A.currentTime = __t0; if (!__wasPaused) A.play(); } catch (e) {}
++                                });
++                            } catch (e) {}
++                        }
++                        G("audioTracks"); G("selectedAudioTrackId");
++                    };
++                    // Build the native track list whenever the tracks are there and we have not
++                    // mirrored them yet. Only running this from "addtrack" missed streams whose
++                    // tracks existed before the listener attached: no audio menu, no language
++                    // preference, LG default (often the commentary track).
++                    if (A.audioTracks && A.audioTracks.length > 0 && (T || []).length !== A.audioTracks.length) {
+                         T = [];
+                         Array.from(A.audioTracks).forEach(function(e, t) {
+                             T.push({
+@@ -21127,6 +21149,13 @@
+                                         }
+                                     });
+                                     G("audioTracks");
++                                    try {
++                                        if (window.AudioPick) {
++                                            var __cur = -1; for (var __c = 0; __c < A.audioTracks.length; __c++) if (A.audioTracks[__c].enabled) { __cur = __c; break; }
++                                            var __alt = window.AudioPick.repick(T.map(function(t) { return { lang: t.lang, label: t.label }; }), __set, __cur);
++                                            if (__alt >= 0) __switchNativeAudio(__alt);
++                                        }
++                                    } catch (e) {}
+                                 }
+                             });
+                         }
+@@ -21134,7 +21163,8 @@
+                         var __set = (function() { try { var __p = (location.hash || "").split("/"); var __ty = __p[5] ? decodeURIComponent(__p[5]) : ""; var __id = __p[6] ? decodeURIComponent(__p[6]) : ""; return (__ty === "anime" || /^(kitsu|mal|anilist|anidb):/i.test(__id)) ? ["ja", "jpn", "jp", "jpz", "jap"] : ["en", "eng"]; } catch (__e) { return ["en", "eng"]; } })();
+                         var __wantJa = __set.indexOf("ja") >= 0;
+                         var prefIdx = -1;
+-                        for (var ai = 0; ai < A.audioTracks.length; ai++) {
++                        if (window.AudioPick) prefIdx = window.AudioPick.pick(T.map(function(t) { return { lang: t.lang, label: t.label }; }), __set);
++                        else for (var ai = 0; ai < A.audioTracks.length; ai++) {
+                             var tl = (A.audioTracks[ai].language || "").toLowerCase(), lb = (A.audioTracks[ai].label || "").toLowerCase();
+                             if (__set.indexOf(tl) >= 0 || __set.indexOf(tl.substring(0, 2)) >= 0 || (__wantJa ? lb.indexOf("japan") >= 0 : lb.indexOf("english") >= 0)) { prefIdx = ai; break; }
+                         }
+@@ -21149,9 +21179,11 @@
+                         G("audioTracks");
+                         G("selectedAudioTrackId");
+                     }
+-                }, 100);
+-            });
++                };
++                A.audioTracks && A.audioTracks.addEventListener && A.audioTracks.addEventListener("addtrack", function() { setTimeout(A.__nativeAudioInit, 100); });
++                (function __audioPoll(n) { if (n <= 0) return; setTimeout(function() { try { A.__nativeAudioInit(); } catch (e) {} __audioPoll(n - 1); }, 500); })(20);
+             A.onloadedmetadata = function() {
++                    try { A.__nativeAudioInit(); } catch (e) {}
+                     G("buffering"), G("buffered"), V("time", C)
+                 }, A.onvolumechange = function() {
+                     G("volume"), G("muted")

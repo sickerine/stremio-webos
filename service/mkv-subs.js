@@ -154,6 +154,12 @@ MkvSubDemux.prototype._leaf = function (id, buf, ds, de) {
 };
 // Cheap track-number peek straight off the source buffer (no copy) so the caller
 // can skip non-subtitle blocks before allocating. Block starts with the track vint.
+// Enough bytes buffered to read the block's track-number vint (<= 8 bytes)?
+MkvSubDemux.prototype._canPeekTrack = function (dsLocal) {
+    if (dsLocal >= this._sPending.length) return false;
+    var len = 1, b = this._sPending[dsLocal]; while (len <= 8 && !(b & (0x80 >> (len - 1)))) len++;
+    return dsLocal + len <= this._sPending.length;
+};
 MkvSubDemux.prototype._blockIsSub = function (buf, ds) {
     var tn = readSize(buf, ds); if (!tn) return false;
     return this.allSubs ? !!this.subTracks[tn.value] : (tn.value === this.subTrack);
@@ -248,6 +254,13 @@ MkvSubDemux.prototype._parseStream = function () {
         var deAbs = szr.unknown ? Infinity : dsAbs + szr.value;
         if (MASTER[idr.id]) { if (idr.id === IDS.CLUSTER) this._curCluster = this._sPos; this._openMaster(idr.id); this._stack.push({ id: idr.id, end: deAbs }); this._sPos = dsAbs; continue; }
         if (deAbs === Infinity) { this._sPos = dsAbs; continue; }     // shouldn't happen for leaves
+        // Video/audio (Simple)Blocks are 99%+ of the bytes and hundreds of KB each.
+        // Decide from the track vint at the block's head, which is already in the
+        // buffer, and SKIP them without waiting for (and concat-copying) the whole
+        // block. That copying was ~200% CPU on the TV at 4K bitrates.
+        if ((idr.id === IDS.SIMPLEBLOCK || idr.id === IDS.BLOCK) && this._canPeekTrack(dsLocal)) {
+            if (!this._blockIsSub(this._sPending, dsLocal)) { this._sPos = deAbs; continue; }
+        }
         if (deAbs - this._sAbs > this._sPending.length) break;        // wait for full leaf data
         this._leaf(idr.id, this._sPending, dsLocal, deAbs - this._sAbs);
         this._sPos = deAbs;
@@ -259,6 +272,10 @@ MkvSubDemux.prototype._trim = function (keepTail) {
     // While resyncing, keep a chunk of tail so a cluster marker + its validation
     // bytes (size + CRC/Void + Timestamp) aren't split across a chunk boundary.
     if (keepTail) drop = Math.max(0, this._sPending.length - 64);
+    // A skipped block may end past what has arrived: drop only what we hold and let
+    // _sPos run ahead; the stream stays contiguous (no false resync) and the rest of
+    // the skipped block is discarded as it arrives.
+    if (drop > this._sPending.length) drop = this._sPending.length;
     if (drop > 0) { this._sPending = this._sPending.slice(drop); this._sAbs += drop; if (this._sPos < this._sAbs) this._sPos = this._sAbs; }
 };
 // Walk children of a master element occupying [start,end).
