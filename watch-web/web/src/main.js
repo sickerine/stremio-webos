@@ -2,6 +2,8 @@ import { buildUi } from "./ui.js";
 import { connectRelay } from "./relay.js";
 import { Pipeline } from "./player/pipeline.js";
 import { SubtitleDemux, AssRenderer } from "./subtitles/ass.js";
+import { BitmapDemux } from "./subtitles/bitmap-demux.js";
+import { BitmapRenderer } from "./subtitles/bitmap.js";
 import { TextSubtitles } from "./subtitles/text.js";
 import { estimateTvPosition, syncAction, tvJumped, tvStalled, SNAP_WINDOW_MS } from "./sync.js";
 
@@ -72,7 +74,7 @@ const queueStart = (id, cdnUrl, size) => queued(() => startSession(id, cdnUrl, s
 async function endSession() {
   const s = session; session = null;
   if (!s) return;
-  await s.ass.hide(); s.text.hide(); s.demux.dispose();
+  await s.ass.hide(); s.text.hide(); s.bitmap.hide(); s.demux.dispose();
   await s.pipeline.close();
 }
 
@@ -81,13 +83,20 @@ async function startSession(sessionId, cdnUrl, size) {
   if (session) return;                       // a later transition already took over
   ui.setStage("open");
   ui.overlay(true, tvState?.title || "Opening the stream", "Preparing it for your browser.");
-  const s = { id: sessionId, cdnUrl, size, subTracks: [], selectedSub: null, fonts: 0 };
+  const s = { id: sessionId, cdnUrl, size, subTracks: [], textTracks: [], bitmapTracks: [], selectedSub: null, fonts: 0 };
   s.ass = new AssRenderer(video, ui.el.assLayer);
   s.text = new TextSubtitles(video);
+  s.bitmap = new BitmapRenderer(video, ui.el.assLayer);
+  const gotTracks = () => { s.subTracks = [...s.textTracks, ...s.bitmapTracks]; renderSubsMenu(); autoSelectSub(); };
+  s.bdemux = new BitmapDemux({
+    onTracks: tracks => { s.bitmapTracks = tracks; s.bitmap.setTracks(tracks); gotTracks(); },
+    onBlock: (t, b) => s.bitmap.addBlock(t, b),
+  });
   s.demux = new SubtitleDemux({
-    onTracks: tracks => { s.subTracks = tracks; s.ass.setTracks(tracks); s.text.setTracks(tracks); renderSubsMenu(); autoSelectSub(); },
+    onTracks: tracks => { s.textTracks = tracks; s.ass.setTracks(tracks); s.text.setTracks(tracks); gotTracks(); },
     onFont: f => { s.fonts++; s.ass.addFont(f); },
     onCue: (n, cue) => { s.ass.addCue(n, cue); s.text.addCue(n, cue); },
+    tap: s.bdemux.tap,
   });
   s.pipeline = new Pipeline(video, {
     onTracks: t => { renderAudioMenu(); ui.setStats(`${t.video.height}p${t.video.hdr ? " HDR" : ""}`); },
@@ -126,7 +135,8 @@ function renderAudioMenu() {
 }
 function renderSubsMenu() {
   const s = session; if (!s) return;
-  const items = s.subTracks.map(t => ({ id: t.number, ...trackParts(t.language || "eng", t.name), tag: t.type === "ass" || t.type === "ssa" ? "styled" : "text" }));
+  const tag = t => t.type === "ass" || t.type === "ssa" ? "styled" : t.type === "pgs" || t.type === "vobsub" ? "bitmap" : "text";
+  const items = s.subTracks.map(t => ({ id: t.number, ...trackParts(t.language || "eng", t.name), tag: tag(t) }));
   ui.subsMenu(items, s.selectedSub, id => selectSub(id, true));
 }
 function autoSelectSub() {
@@ -141,9 +151,10 @@ async function selectSub(number, user) {
   s.selectedSub = number;
   const t = s.subTracks.find(x => x.number === number);
   if (user) { prefs.subs = number == null ? "off" : (t?.language || "eng"); localStorage.setItem("watch.subs", prefs.subs); }
-  if (number == null) { await s.ass.hide(); s.text.hide(); }
-  else if (t?.type === "ass" || t?.type === "ssa") { s.text.hide(); await s.ass.show(number); }
-  else { await s.ass.hide(); s.text.show(number); }
+  if (number == null) { await s.ass.hide(); s.text.hide(); s.bitmap.hide(); }
+  else if (t?.type === "ass" || t?.type === "ssa") { s.text.hide(); s.bitmap.hide(); await s.ass.show(number); }
+  else if (t?.type === "pgs" || t?.type === "vobsub") { s.text.hide(); await s.ass.hide(); await s.bitmap.show(number); }
+  else { await s.ass.hide(); s.bitmap.hide(); s.text.show(number); }
   renderSubsMenu();
 }
 
@@ -258,7 +269,7 @@ window.__watch = () => {
     buffered: p?.buffered() || [],
     tracks: p?.tracks && { video: { codec: p.tracks.video.codec, codecString: p.tracks.video.codecString, hdr: p.tracks.video.hdr }, audios: p.tracks.audios.map(a => ({ id: a.id, lang: a.language, codec: a.codec, ch: a.channels, playable: a.playable })), duration: p.tracks.duration },
     selectedAudio: p?.selectedAudioId ?? null,
-    subs: s && { tracks: s.subTracks.map(t => ({ n: t.number, lang: t.language, type: t.type, name: t.name })), selected: s.selectedSub, fonts: s.fonts, assEvents: Object.fromEntries([...s.ass.events].map(([k, v]) => [k, v.length])), activeAss: s.ass.activeTrack, jassub: Boolean(s.ass.jassub), jassubReady: s.ass.ready, pushed: s.ass.pushed, showCalls: s.ass.showCalls, assError: s.ass.lastError, demux: { ...s.demux.stats, firstCluster: s.demux.firstCluster, headerCursor: s.demux.headerCursor, cursor: s.demux.cursor, pending: s.demux.pending.size } },
+    subs: s && { tracks: s.subTracks.map(t => ({ n: t.number, lang: t.language, type: t.type, name: t.name })), selected: s.selectedSub, fonts: s.fonts, assEvents: Object.fromEntries([...s.ass.events].map(([k, v]) => [k, v.length])), activeAss: s.ass.activeTrack, jassub: Boolean(s.ass.jassub), jassubReady: s.ass.ready, pushed: s.ass.pushed, showCalls: s.ass.showCalls, assError: s.ass.lastError, demux: { ...s.demux.stats, firstCluster: s.demux.firstCluster, headerCursor: s.demux.headerCursor, cursor: s.demux.cursor, pending: s.demux.pending.size }, bitmap: { ...s.bitmap.stats, active: s.bitmap.active, drawn: s.bitmap.drawn, demux: s.bdemux.stats } },
     net: p?.source && { requests: p.source.requests, retries: p.source.retries || 0, fetchedMB: +(p.source.bytesFetched / 1048576).toFixed(1), size: p.source.size },
     feed: p?.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, transcode: p.run.transcode },
   };
