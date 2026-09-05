@@ -59,6 +59,16 @@ function showIdle() {
   ui.setTv(""); ui.setTitle(""); ui.setStats(""); ui.setFacts([]);
 }
 
+// Every session transition goes through ONE queue. Two teardowns used to race on a
+// stream switch: onState fired endSession() without awaiting it, onMedia saw
+// `session` already null and started the new stream, and the old teardown's last
+// step (dropping video.src) then detached the NEW MediaSource -> "SourceBuffer has
+// been removed from the parent media source" on a perfectly good stream.
+let transition = Promise.resolve();
+function queued(fn) { const run = () => fn().catch(e => console.error(e)); transition = transition.then(run, run); return transition; }
+const queueEnd = () => queued(endSession);
+const queueStart = (id, cdnUrl, size) => queued(() => startSession(id, cdnUrl, size));
+
 async function endSession() {
   const s = session; session = null;
   if (!s) return;
@@ -68,6 +78,7 @@ async function endSession() {
 
 async function startSession(sessionId, cdnUrl, size) {
   await endSession();
+  if (session) return;                       // a later transition already took over
   ui.setStage("open");
   ui.overlay(true, tvState?.title || "Opening the stream", "Preparing it for your browser.");
   const s = { id: sessionId, cdnUrl, size, subTracks: [], selectedSub: null, fonts: 0 };
@@ -221,13 +232,13 @@ const relay = connectRelay({
       ui.setStage("resolve");
       ui.overlay(true, titleFor(state), resolveError ? unreachableText(resolveHost) : "The TV just started something.");
     }
-    if (session && session.id !== state.sessionId) { void endSession(); ui.overlay(true, "Switching stream", "The TV changed what it's playing."); }
+    if (session && session.id !== state.sessionId) { void queueEnd(); ui.overlay(true, "Switching stream", "The TV changed what it's playing."); }
   },
   onMedia: (cdnUrl, sessionId, { size, resolveError } = {}) => {
     if (resolveError) console.warn("resolve failed, using original url:", resolveError);
-    if (!session || session.id !== sessionId) void startSession(sessionId, cdnUrl, size);
+    if (!session || session.id !== sessionId) void queueStart(sessionId, cdnUrl, size);
   },
-  onIdle: () => { void endSession(); tvState = null; showIdle(); },
+  onIdle: () => { void queueEnd(); tvState = null; showIdle(); },
   onResolveError: (message, attempt, host) => {
     if (session) return;
     ui.setStage("resolve");

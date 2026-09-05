@@ -137,7 +137,7 @@ media-controller:not([userinactive]) .hud, media-controller.show-hud .hud { opac
 .brand-mark svg { width: 13px; height: 13px; fill: currentColor; transform: rotate(8deg); }
 .overlay .center { align-self: center; max-width: 620px; }
 .overlay h1 { font-size: clamp(2rem, 4.4vw, 3rem); font-weight: 700; letter-spacing: -.05em; }
-.overlay .lead { margin-top: var(--space-4); font-size: 1rem; color: var(--color-ink-subtle); max-width: 52ch; }
+.overlay .lead { margin-top: var(--space-4); font-size: 1rem; line-height: 1.45; color: var(--color-ink-subtle); max-width: 52ch; overflow-wrap: anywhere; }
 .overlay .steps { margin-top: var(--space-8); display: grid; gap: var(--space-3); }
 .overlay .steps[hidden] { display: none; }
 .step { display: grid; grid-template-columns: 1.5rem 1fr; align-items: center; gap: var(--space-3); font-size: .9375rem; font-weight: 500; color: var(--color-ink-faint); transition: color var(--duration-standard) var(--ease-out); }
