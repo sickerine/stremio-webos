@@ -12,7 +12,7 @@ function loadStreamUi() {
     assert.ok(source, 'stream card UI script was not found');
     const storage = new Map();
     const context = {
-        window: { addEventListener() {}, dispatchEvent() {} },
+        window: { addEventListener() {}, dispatchEvent() {}, StreamFilters: require('../service/overlay/stream-filters.js') },   // loaded by <script src="/stream-filters.js"> on the TV
         location: { hash: '#/detail/series/kitsu:1' },
         localStorage: {
             getItem(key) { return storage.get(key) || null; },

@@ -63,7 +63,9 @@ const sandbox = {
     window: {
         __assCtl: {
             video,
-            clock: { now() { return 12.5; } }
+            jassub: {},                                  // rAF loop alive (the clock only ticks with a renderer)
+            _seeking: false,
+            clock: { now() { return 12.5; }, running: true }
         },
         __stremioCurrentMedia() {
             return { url: 'https://media.example/bleach-3.mkv', teed: true };
@@ -81,7 +83,15 @@ socket.open();
 assert.strictEqual(socket.sent.length, 1, 'opening the socket publishes current state');
 const first = socket.sent[0];
 assert.strictEqual(first.type, 'state');
-assert.strictEqual(first.state.positionSeconds, 12.5, 'bridge uses existing stabilized media clock');
+assert.strictEqual(first.state.positionSeconds, 12.5, 'bridge uses existing stabilized media clock while it is running');
+// A frozen clock (after a seek, a stall, or with no subtitle renderer) must NOT be
+// reported: viewers would see a TV that never advances. Fall back to the player's time.
+sandbox.window.__assCtl.clock.running = false;
+socket.sent.length = 0;
+video.emit('seeked');
+assert.strictEqual(socket.sent.length, 1, 'seeked publishes a sample');
+assert.strictEqual(socket.sent[0].state.positionSeconds, video.currentTime, 'frozen clock -> player currentTime');
+sandbox.window.__assCtl.clock.running = true;
 assert.strictEqual(first.state.mediaUrl, 'https://media.example/bleach-3.mkv');
 assert.strictEqual(first.state.episodeId, 'kitsu:49444:3');
 assert.strictEqual(first.state.paused, false);

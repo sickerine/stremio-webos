@@ -63,6 +63,8 @@ function Session(cdnUrl) {
     this.refreshRunning = false;   // expired temporary CDN URL is refreshed single-flight
     this._refreshCbs = [];
     this.liveConns = 0;            // open tee connections (never evict while >0)
+    this.demuxedBytes = 0;         // bytes walked by a per-connection demuxer
+    this.passthroughBytes = 0;     // bytes piped to the player without demuxing (no text subs)
     this.videoFps = null;          // exact fps from the container (video DefaultDuration)
     this.lastActivity = Date.now();
     this.ensureBootstrap();
@@ -235,6 +237,10 @@ Session.prototype._bootstrap = function () {
 // Per-connection demuxer (concurrent-safe), demuxing all sub tracks. Seeded from
 // the bootstrapped track map when ready; a start-at-0 stream self-seeds from the
 // Tracks header in its own bytes so it does not need the seed.
+// A file with no S_TEXT (ASS/SSA/SRT) tracks has nothing for the tee to extract:
+// PGS/VobSub are bitmaps the player renders itself. Walking every byte of a 4K
+// stream through the EBML parser for nothing cost ~150% CPU on the TV.
+Session.prototype.hasTextSubs = function () { return !this.ready || Object.keys(this.subTrackSet).length > 0; };
 Session.prototype.newDemux = function () {
     var d = new M.MkvSubDemux(this._sink());
     d.allSubs = true;
@@ -306,6 +312,36 @@ function ensure(cdnUrl) {
     return sessions[key];
 }
 
+// ---- liveness ------------------------------------------------------------------
+// The app page hits launch.js every few seconds while it is alive (library poll,
+// posters, status). If it dies (webOS kills the foreground app under memory
+// pressure) the LG media pipeline it started can outlive it and keep pulling the
+// stream through us at line speed for hours. So: launch.js calls touchPage() on
+// every page request, and reap() drops every live tee connection once the page
+// has been silent for PAGE_GONE_MS, plus any upstream that sat paused with no
+// progress for STALL_MS (a client that vanished without closing its socket).
+var PAGE_GONE_MS = parseInt(process.env.ASS_TEE_PAGE_GONE_MS || '60000', 10);
+var STALL_MS = parseInt(process.env.ASS_TEE_STALL_MS || '120000', 10);
+var _now = function () { return Date.now(); };
+var lastPageActivity = _now();
+var live = [];                      // [{ up, res, sess, progressAt }]
+function touchPage() { lastPageActivity = _now(); }
+function dropConn(c, why) {
+    var i = live.indexOf(c); if (i >= 0) live.splice(i, 1);
+    try { if (c.up) { c.up.destroy(); } } catch (e) {}
+    try { if (c.res) { c.res.destroy(); } } catch (e) {}
+    c.dropped = why;
+}
+function reap() {
+    var now = _now(), dropped = 0;
+    var pageGone = live.length > 0 && (now - lastPageActivity) > PAGE_GONE_MS;
+    live.slice().forEach(function (c) {
+        if (pageGone) { dropConn(c, 'page-gone'); dropped++; }
+        else if (c.paused && (now - c.progressAt) > STALL_MS) { dropConn(c, 'stalled'); dropped++; }
+    });
+    return { dropped: dropped, live: live.length, pageGone: pageGone };
+}
+
 // ---- the tee HTTP server (the player streams THROUGH this) -------------------
 var tee = http.createServer(function (req, res) {
     var path = (req.url || '/').split('?')[0];
@@ -326,6 +362,7 @@ var tee = http.createServer(function (req, res) {
     var demux = null, pre = [], preLen = 0, closed = false;
     function makeDemux() {
         if (demux) return;
+        if (!sess.hasTextSubs()) { pre = null; return; }                 // nothing to extract: pure passthrough
         demux = sess.newDemux();
         if (pre) { for (var i = 0; i < pre.length; i++) { try { demux.pushAt(pre[i][0], pre[i][1]); } catch (e) {} } pre = null; }
     }
@@ -336,8 +373,9 @@ var tee = http.createServer(function (req, res) {
     });
     var cancelReady = sess.whenReady(function () {
         if (closed) return;
+        if (!sess.hasTextSubs()) { demux = null; pre = null; return; }   // bootstrap found no text tracks: stop demuxing
         if (!demux) makeDemux();
-        demux.subTracks = sess.subTrackSet;
+        if (demux) demux.subTracks = sess.subTrackSet;
     });
     sess.liveConns++;
     function closeConn() { if (!closed) { closed = true; cancelReady(); sess.liveConns = Math.max(0, sess.liveConns - 1); sess.lastActivity = Date.now(); pre = null; preLen = 0; } }   // release the pre-bootstrap buffer (up to 16MB)
@@ -348,6 +386,8 @@ var tee = http.createServer(function (req, res) {
         try { res.writeHead(up.statusCode, h); } catch (e) { closeConn(); try { up.destroy(); } catch (x) {} return; }
         var off = start;
         var pending = 0, paused = false;
+        var conn = { up: up, res: res, sess: sess, paused: false, progressAt: _now() };
+        live.push(conn);
         // BACKPRESSURE, bounded (critical, and delicate — read before changing):
         //  * No pause at all  -> the whole multi-GB file lands in res's writable queue
         //                        in RAM -> ~1GB RSS -> OOM at stream start.
@@ -357,23 +397,25 @@ var tee = http.createServer(function (req, res) {
         //                        then runs dry and subs vanish mid-episode.
         // So: allow up to READAHEAD_CAP bytes in flight, resume at half (hysteresis, to
         // avoid pause/resume churn every 16KB). Memory bounded; demuxer keeps a lead.
-        function wrote(n) { return function () { pending -= n; if (paused && pending <= (READAHEAD_CAP >> 1)) { paused = false; try { up.resume(); } catch (e) {} } }; }
+        function wrote(n) { return function () { pending -= n; conn.progressAt = _now(); if (paused && pending <= (READAHEAD_CAP >> 1)) { paused = false; conn.paused = false; try { up.resume(); } catch (e) {} } }; }
         up.on('data', function (c) {
-            if (demux) { try { demux.pushAt(off, c); } catch (e) {} }
+            if (demux) { sess.demuxedBytes += c.length; try { demux.pushAt(off, c); } catch (e) {} }
             else if (pre) {                                                            // still buffering (not closed)
                 if (preLen < 16777216) { pre.push([off, c]); preLen += c.length; }     // buffer until bootstrapDone
-                else { makeDemux(); try { demux.pushAt(off, c); } catch (e) {} }        // overflow: proceed best-effort
+                else { makeDemux(); if (demux) { try { demux.pushAt(off, c); } catch (e) {} } }   // overflow: proceed best-effort
             }
+            else sess.passthroughBytes += c.length;
             off += c.length;
             try {
                 pending += c.length;
                 res.write(c, wrote(c.length));
-                if (pending > READAHEAD_CAP && !paused) { paused = true; up.pause(); }
+                if (pending > READAHEAD_CAP && !paused) { paused = true; conn.paused = true; up.pause(); }
             } catch (e) {}
         });
-        up.on('end', function () { sess.lastActivity = Date.now(); try { res.end(); } catch (e) {} });
-        up.on('error', function () { try { res.end(); } catch (e) {} });
-        res.on('close', function () { closeConn(); try { up.destroy(); } catch (e) {} });
+        function unregister() { var i = live.indexOf(conn); if (i >= 0) live.splice(i, 1); }
+        up.on('end', function () { sess.lastActivity = Date.now(); unregister(); try { res.end(); } catch (e) {} });
+        up.on('error', function () { unregister(); try { res.end(); } catch (e) {} });
+        res.on('close', function () { closeConn(); unregister(); try { up.destroy(); } catch (e) {} });
     }); });
 });
 tee.on('clientError', function (e, sock) { try { sock.destroy(); } catch (x) {} });
@@ -386,10 +428,13 @@ function status(cdnUrl) {
     s.lastActivity = Date.now();   // the client poll is a heartbeat — keep the session alive
     s.ensureBootstrap();           // failed bursts cool down, then recover instead of staying poisoned
     var fp = s.fontPlan();
-    return { state: s.ready ? 'streaming' : 'probing', ready: s.ready, tracks: s.list(), fonts: Object.keys(s.fonts), fontAvail: fp.avail, fontEager: fp.eager, videoFps: s.videoFps };
+    return { state: s.ready ? 'streaming' : 'probing', ready: s.ready, tracks: s.list(), fonts: Object.keys(s.fonts), fontAvail: fp.avail, fontEager: fp.eager, videoFps: s.videoFps,
+             textSubs: s.hasTextSubs(), demuxedBytes: s.demuxedBytes, passthroughBytes: s.passthroughBytes, liveConns: s.liveConns };
 }
 function trackText(cdnUrl, index, tSec, winSec) { var s = sessions[keyFor(cdnUrl)]; if (!s) return ''; s.lastActivity = Date.now(); return s.trackText(index | 0, tSec, winSec); }
 function fontData(cdnUrl, name) { var s = sessions[keyFor(cdnUrl)]; if (!s) return null; s.lastActivity = Date.now(); return s.fonts[name] || null; }
 function teeUrl(cdnUrl) { return 'http://127.0.0.1:' + PORT + '/s/' + encodeURIComponent(cdnUrl); }
 
-module.exports = { status: status, trackText: trackText, fontData: fontData, teeUrl: teeUrl, keyFor: keyFor, PORT: PORT, _sessions: sessions };
+module.exports = { status: status, trackText: trackText, fontData: fontData, teeUrl: teeUrl, keyFor: keyFor, PORT: PORT, _sessions: sessions,
+    touchPage: touchPage, reap: reap, liveCount: function () { return live.length; },
+    _setNow: function (fn) { _now = fn || function () { return Date.now(); }; lastPageActivity = _now(); } };
