@@ -40,6 +40,8 @@ function reapOldInstances() {
     return killed.length;
 }
 reapOldInstances();
+// Drop tee streams whose app page has died (orphaned LG pipeline) or that stalled.
+setInterval(function () { try { var r = assTee.reap(); if (r.dropped) console.log('[launch] tee reap: dropped ' + r.dropped + (r.pageGone ? ' (page gone)' : ' (stalled)')); } catch (e) {} }, 15000);
 
 // Keep the service alive indefinitely
 service.activityManager.create('keepAlive', function() {});
@@ -311,6 +313,7 @@ function warmFromBody(body) {
 // Single server: static files first, then proxy to streaming server
 var proxyServer = http.createServer(function(req, res) {
     var urlPath = req.url.split('?')[0];
+    assTee.touchPage();   // any page request proves the app is alive (see ass-tee reap)
     // In-process AniList "currently airing" catalog addon (served to Stremio
     // as http://127.0.0.1:8081/anime-airing/...). CORS + JSON per addon spec.
     if (urlPath.indexOf('/anime-airing/') === 0) {
