@@ -48,13 +48,19 @@ function blockPayload(s, readOrder) {
  * Emits: onTracks(tracks), onFont(file), onCue(trackNumber, cue)
  */
 export class SubtitleDemux {
-  constructor({ onTracks, onFont, onCue }) {
-    this.onTracks = onTracks; this.onFont = onFont; this.onCue = onCue;
+  // `tap(tag)` sees every decoded EBML tag (used for bitmap subtitle tracks, which
+  // matroska-subtitles itself ignores).
+  constructor({ onTracks, onFont, onCue, tap }) {
+    this.onTracks = onTracks; this.onFont = onFont; this.onCue = onCue; this.tap = tap;
     this.tracks = null;
     this.firstCluster = null;     // byte offset of the first Cluster (header end)
     this.headerCursor = 0;
     this.headerParser = new (MS().SubtitleParser)();
-    this.headerParser.once("tracks", t => { this.tracks = t; queueMicrotask(() => { try { onTracks?.(t); } catch (e) { this.stats.lastConsumerError = `${e?.message || e}`; } }); });
+    // SubtitleParser ends itself when the file has no S_TEXT tracks; a placeholder keeps
+    // it decoding so the tap still gets blocks. Filtered out of the emitted list below.
+    this.headerParser.subtitleTracks.set(-1, { number: -1 });
+    if (tap) this.headerParser.decoder.on("data", tap);
+    this.headerParser.once("tracks", t => { t = t.filter(x => x.number !== -1); this.tracks = t; queueMicrotask(() => { try { onTracks?.(t); } catch (e) { this.stats.lastConsumerError = `${e?.message || e}`; } }); });
     this.headerParser.on("file", f => queueMicrotask(() => { try { onFont?.(f); } catch (e) { this.stats.lastConsumerError = `${e?.message || e}`; } }));
     this.headerParser.on("subtitle", (s, n) => this._emitCue(n, s));
     this.headerParser.on("error", () => {});
@@ -128,6 +134,7 @@ export class SubtitleDemux {
     this.stats.streamsOpened++;
     this.stream = new (MS().SubtitleStream)(this.stream || this.headerParser);
     this._instrument(this.stream);
+    if (this.tap) this.stream.decoder.on("data", this.tap);
     this.stream.on("subtitle", (s, n) => { this.stats.cues++; this._emitCue(n, s); });
     this.stream.on("error", () => {});
     this.stream.resume?.();
