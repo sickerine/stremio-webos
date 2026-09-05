@@ -6,8 +6,9 @@
 // CPU, and audio is cheap).
 import {
   Input, Output, MATROSKA, Mp4OutputFormat, AppendOnlyStreamTarget, StreamSource, canEncodeAudio,
-  EncodedPacketSink, EncodedVideoPacketSource, EncodedAudioPacketSource, AudioSampleSink, AudioSampleSource,
+  EncodedPacketSink, EncodedVideoPacketSource, EncodedAudioPacketSource, AudioSampleSink, AudioSampleSource, AudioSample,
 } from "mediabunny";
+import { downmixToStereo } from "./downmix.js";
 import { registerAc3Decoder } from "@mediabunny/ac3";
 import { registerDtsDecoder } from "@mediabunny/dts";
 import { ByteSource } from "../net/byte-source.js";
@@ -22,6 +23,12 @@ const BEHIND_SECONDS = 45;     // evict buffer older than this
 const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
 const OPUS_BITRATE = 256_000;
 
+function toStereo(sample) {
+  const ch = sample.numberOfChannels, frames = sample.numberOfFrames;
+  const src = new Float32Array(frames * ch);
+  sample.copyTo(src, { planeIndex: 0, format: "f32" });
+  return new AudioSample({ format: "f32", numberOfChannels: 2, sampleRate: sample.sampleRate, numberOfFrames: frames, timestamp: sample.timestamp, data: downmixToStereo(src, ch, frames) });
+}
 function mime(v, a) { return `video/mp4; codecs="${[v, a].filter(Boolean).join(", ")}"`; }
 
 let opusOk = null;
@@ -175,7 +182,12 @@ export class Pipeline {
         }
       } else if (sampleIter) {
         while (aSample && aSample.timestamp <= ts && !run.cancelled) {
-          run.stage = 'encode'; await aSrc.add(aSample); na++; run.na = na; run.stage = 'feeding'; aSample.close?.();
+          run.stage = 'encode';
+          // Fold surround to stereo ourselves: mediabunny's own mixer drops the centre
+          // channel (dialogue) for anything but quad/5.1.
+          const s = aSample.numberOfChannels > 2 ? toStereo(aSample) : aSample;
+          await aSrc.add(s); na++; run.na = na; run.stage = 'feeding';
+          if (s !== aSample) s.close?.(); aSample.close?.();
           aSample = (await sampleIter.next()).value || null;
         }
       }
