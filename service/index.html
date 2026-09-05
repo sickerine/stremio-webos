@@ -63,6 +63,7 @@
             white-space: normal !important; display: -webkit-box !important; -webkit-box-orient: vertical;
             -webkit-line-clamp: 2; overflow: hidden; line-height: 1.25; }
     </style>
+    <script src="/stream-filters.js"></script>
     <script>
         // For anime (kitsu ids): filter streams by the entry's saved release
         // kind (all | seasonal | bd), then re-sort by seeders (health matters
@@ -73,9 +74,9 @@
         //   (Judas/EMBER/Anime Time also publish BD batches).
         // Empty result is honest (e.g. BD on a currently-airing show).
         (function () {
-            var BD_RE = /(^|[^a-z0-9])(bd(rip|mv)?|blu-?ray|remux|jpbd)([^a-z]|$)/i;
-            var GROUPS = ['subsplease', 'erai-raws', 'erai raws', 'judas', 'asw', 'yameii', 'toonshub', 'dkb', 'anime time', 'horriblesubs', 'ember', 'asakura', 'ironclad', 'feibanyama'];
-            var INLINE = ['varyg', 'tsundere-raws', 'tsundere raws'];
+            var SF = window.StreamFilters;   // service/overlay/stream-filters.js (tested in vactest/)
+            function isBD(t) { return SF.isBD(t); }
+            function isSeasonal(t) { return SF.isSeasonal(t); }
             function entryId() {
                 var h = '';
                 try { h = decodeURIComponent(location.hash || ''); } catch (e) { h = location.hash || ''; }
@@ -92,18 +93,6 @@
                 if (!id) return;
                 try { localStorage.setItem('animeStreamKind:' + id, kind); } catch (e) {}
             };
-            function isBD(t) { return BD_RE.test(t); }
-            function isSeasonal(t) {
-                if (isBD(t)) return false;
-                var tl = t.toLowerCase();
-                var lines = tl.split('\n');
-                for (var k = 0; k < lines.length; k++) {
-                    var m = lines[k].trim().match(/^\[([^\]]+)\]/);
-                    if (m) { var g = m[1]; for (var i = 0; i < GROUPS.length; i++) if (g.indexOf(GROUPS[i]) === 0) return true; }
-                }
-                for (var j = 0; j < INLINE.length; j++) if (tl.indexOf(INLINE[j]) >= 0) return true;
-                return false;
-            }
             // Library membership for poster indicators. The library lives in
             // the ACCOUNT; the worker fetch interceptor tees the app's own
             // datastore sync into /library-cache, which we poll here.
@@ -177,9 +166,6 @@
             // so a release that names only those is "unsupported". No codec in the
             // name -> keep it visible. "Atmos" alone means Dolby Digital Plus Atmos
             // (WEB-DL); "TrueHD Atmos" is TrueHD.
-            var DEC_OK = /(^|[^a-z0-9])(ddp?|dd\+|e-?ac-?3|eac3|ac-?3|dolby[ .]?digital|aac|flac|opus|mp3|pcm|lpcm)([^a-z0-9]|$)/i;
-            var DEC_NO = /(^|[^a-z0-9])(dts(-?(hd|x|es|ma))?|true-?hd|mlp)([^a-z0-9]|$)/i;
-            function streamText(s) { return ((s && (s.title || '')) + '\n' + (s && (s.description || '')) + '\n' + (s && (s.name || ''))); }
             function isKitsuPage() { try { return /kitsu(:|%3A)\d+/i.test(location.hash || ''); } catch (e) { return false; } }
             function detailId() {
                 var h = '';
@@ -187,14 +173,10 @@
                 var m = h.match(/#\/detail\/[^/]+\/([^/?]+)/);
                 return m ? m[1] : null;
             }
-            window.__streamSupport = function (stream) {
-                var t = streamText(stream);
-                var ok = DEC_OK.test(t) || (/atmos/i.test(t) && !/true-?hd/i.test(t));
-                return (DEC_NO.test(t) && !ok) ? 'unsupported' : 'supported';
-            };
+            window.__streamSupport = function (stream) { return SF.support(SF.text(stream)); };
             function supportKind() {
                 var id = detailId();
-                try { return (id && localStorage.getItem('streamSupportKind:' + id)) || 'supported'; } catch (e) { return 'supported'; }
+                try { return (id && localStorage.getItem('streamSupportKind:' + id)) || SF.defaultKind(false); } catch (e) { return SF.defaultKind(false); }
             }
             function setSupportKind(kind) {
                 var id = detailId();
@@ -207,17 +189,10 @@
             window.__applyStreamKind = function (streams, kind) {
                 try {
                     if (isKitsuPage()) return window.__sortAnimeStreams(streams, kind);
-                    if (!streams || !streams.length) return streams;
-                    var k = kind || supportKind();
-                    if (k === 'all') return streams;
-                    return streams.filter(function (s) { return window.__streamSupport(s) === k; });
+                    return SF.filterByKind(streams, kind || supportKind(), false);
                 } catch (e) { return streams; }
             };
-            window.__streamKindOptions = function (kind) {
-                var opts = isKitsuPage() ? [['all', 'All'], ['seasonal', 'Seasonal'], ['bd', 'BD']]
-                                         : [['all', 'All'], ['supported', 'Supported'], ['unsupported', 'Unsupported']];
-                return opts.map(function (o) { return { value: o[0], label: o[1], selected: o[0] === kind }; });
-            };
+            window.__streamKindOptions = function (kind) { return SF.kindOptions(isKitsuPage(), kind); };
             // Distinctive badges for stream cards. Res/HDR from Torrentio's
             // normalized `name` line; BD from title/description (never in name).
             var RES_ORDER = ['4K', '1080p', '720p', '480p'];
