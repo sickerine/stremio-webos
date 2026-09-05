@@ -92,6 +92,7 @@ export class Pipeline {
 
     if (!this.mediaSource) {
       this.mediaSource = new MediaSource();
+      this.video.__pipeline = this;                                   // whoever attached last owns the element
       this.video.src = URL.createObjectURL(this.mediaSource);
       await new Promise(r => this.mediaSource.addEventListener("sourceopen", r, { once: true }));
       this.mediaSource.duration = this.tracks.duration;
@@ -100,7 +101,7 @@ export class Pipeline {
     } else {
       await this._whenIdle();
       try { this.sourceBuffer.abort(); } catch {}
-      if (this.sourceBuffer.buffered.length) await this._remove(0, this.mediaSource.duration || 1e9);
+      if ((this._ranges() || []).length) await this._remove(0, this.mediaSource.duration || 1e9);
       try { this.sourceBuffer.changeType(codecs); } catch {}
     }
     this.currentMime = codecs;
@@ -201,17 +202,25 @@ export class Pipeline {
         sb.addEventListener("updateend", () => resolve(), { once: true });
       };
       if (sb.updating) sb.addEventListener("updateend", go, { once: true }); else go();
-    })).catch(e => { if (e?.name === "QuotaExceededError") this._evict(true); else this.onError?.(e); });
+    })).catch(e => {
+      if (e?.name === "QuotaExceededError") { this._evict(true); return; }
+      // Detached/removed SourceBuffer: this pipeline lost the element to a newer one. Stop quietly.
+      if (e?.name === "InvalidStateError") { if (this.run) this.run.cancelled = true; return; }
+      this.onError?.(e);
+    });
     return this.appendQueue;
   }
   _whenIdle() { return new Promise(r => { const sb = this.sourceBuffer; if (!sb || !sb.updating) return r(); sb.addEventListener("updateend", () => r(), { once: true }); }); }
   _remove(a, b) { return new Promise(r => { const sb = this.sourceBuffer; try { sb.remove(a, b); sb.addEventListener("updateend", () => r(), { once: true }); } catch { r(); } }); }
-  _bufferedEnd() { const b = this.sourceBuffer?.buffered; if (!b || !b.length) return null; const t = this.video.currentTime; for (let i = 0; i < b.length; i++) if (t >= b.start(i) - 0.5 && t <= b.end(i) + 0.5) return b.end(i); return b.end(b.length - 1); }
-  buffered() { const b = this.sourceBuffer?.buffered; const out = []; if (b) for (let i = 0; i < b.length; i++) out.push([b.start(i), b.end(i)]); return out; }
+  // `.buffered` throws InvalidStateError once the SourceBuffer is detached from its
+  // MediaSource (element re-attached elsewhere); treat that as "nothing buffered".
+  _ranges() { try { return this.sourceBuffer?.buffered || null; } catch { return null; } }
+  _bufferedEnd() { const b = this._ranges(); if (!b || !b.length) return null; const t = this.video.currentTime; for (let i = 0; i < b.length; i++) if (t >= b.start(i) - 0.5 && t <= b.end(i) + 0.5) return b.end(i); return b.end(b.length - 1); }
+  buffered() { const b = this._ranges(); const out = []; if (b) for (let i = 0; i < b.length; i++) out.push([b.start(i), b.end(i)]); return out; }
   _evict(force = false) {
-    const sb = this.sourceBuffer; if (!sb || sb.updating || !sb.buffered.length) return;
+    const sb = this.sourceBuffer, b = this._ranges(); if (!sb || sb.updating || !b || !b.length) return;
     const t = this.video.currentTime, keep = force ? 10 : BEHIND_SECONDS;
-    if (sb.buffered.start(0) < t - keep - 5) { try { sb.remove(0, t - keep); } catch {} }
+    if (b.start(0) < t - keep - 5) { try { sb.remove(0, t - keep); } catch {} }
   }
   async _cancelRun() {
     const run = this.run; if (!run) return;
@@ -239,7 +248,8 @@ export class Pipeline {
     await this._cancelRun();
     if (this.mediaSource) { try { if (this.mediaSource.readyState === "open") this.mediaSource.endOfStream(); } catch {} }
     this.mediaSource = null; this.sourceBuffer = null;
-    try { this.video.removeAttribute("src"); this.video.load(); } catch {}
+    // Only tear down the element if no newer pipeline has attached to it since.
+    if (this.video.__pipeline === this) { this.video.__pipeline = null; try { this.video.removeAttribute("src"); this.video.load(); } catch {} }
     this.input?.dispose(); this.input = null;
     this.source?.dispose(); this.source = null;
     this.tracks = null; this.selectedAudioId = null;
