@@ -337,6 +337,7 @@ function reap() {
     var pageGone = live.length > 0 && (now - lastPageActivity) > PAGE_GONE_MS;
     live.slice().forEach(function (c) {
         if (pageGone) { dropConn(c, 'page-gone'); dropped++; }
+        else if (c.res && (c.res.destroyed || c.res.writableEnded)) { dropConn(c, 'dead-response'); dropped++; }
         else if (c.paused && (now - c.progressAt) > STALL_MS) { dropConn(c, 'stalled'); dropped++; }
     });
     return { dropped: dropped, live: live.length, pageGone: pageGone };
@@ -379,7 +380,17 @@ var tee = http.createServer(function (req, res) {
     });
     sess.liveConns++;
     function closeConn() { if (!closed) { closed = true; cancelReady(); sess.liveConns = Math.max(0, sess.liveConns - 1); sess.lastActivity = Date.now(); pre = null; preLen = 0; } }   // release the pre-bootstrap buffer (up to 16MB)
+    // The player (LG's pipeline) opens probe connections and aborts them within
+    // milliseconds. If we only listened for 'close' after the upstream connected, an
+    // abort in that window was never seen: we then streamed the whole file into a
+    // dead response, and because Node reports each dropped write through the callback,
+    // the backpressure counter kept draining and the upstream was never paused (seen
+    // on the TV: 200 Mbps + 100% CPU with no client, until the app was restarted).
+    var clientGone = false;
+    function onClientGone() { clientGone = true; closeConn(); }
+    res.on('close', onClientGone); res.on('error', onClientGone); req.on('aborted', onClientGone);
     sess.whenPinned(function () { sess.fetchPlayerRange(range, function (err, up, finalUrl) {
+        if (clientGone) { try { if (up) { up.resume(); up.destroy(); } } catch (e) {} return; }
         if (err || !up) { closeConn(); try { res.writeHead(502); res.end(); } catch (e) {} return; }
         var h = {};
         ['content-length', 'content-range', 'accept-ranges', 'content-type'].forEach(function (k) { if (up.headers[k]) h[k] = up.headers[k]; });
@@ -397,8 +408,12 @@ var tee = http.createServer(function (req, res) {
         //                        then runs dry and subs vanish mid-episode.
         // So: allow up to READAHEAD_CAP bytes in flight, resume at half (hysteresis, to
         // avoid pause/resume churn every 16KB). Memory bounded; demuxer keeps a lead.
-        function wrote(n) { return function () { pending -= n; conn.progressAt = _now(); if (paused && pending <= (READAHEAD_CAP >> 1)) { paused = false; conn.paused = false; try { up.resume(); } catch (e) {} } }; }
+        function stopUpstream() { closeConn(); unregister(); try { up.destroy(); } catch (e) {} }
+        function wrote(n) { return function (err) {
+            if (err || clientGone) { stopUpstream(); return; }
+            pending -= n; conn.progressAt = _now(); if (paused && pending <= (READAHEAD_CAP >> 1)) { paused = false; conn.paused = false; try { up.resume(); } catch (e) {} } }; }
         up.on('data', function (c) {
+            if (clientGone || res.destroyed || res.writableEnded) { stopUpstream(); return; }
             if (demux) { sess.demuxedBytes += c.length; try { demux.pushAt(off, c); } catch (e) {} }
             else if (pre) {                                                            // still buffering (not closed)
                 if (preLen < 16777216) { pre.push([off, c]); preLen += c.length; }     // buffer until bootstrapDone
@@ -415,7 +430,7 @@ var tee = http.createServer(function (req, res) {
         function unregister() { var i = live.indexOf(conn); if (i >= 0) live.splice(i, 1); }
         up.on('end', function () { sess.lastActivity = Date.now(); unregister(); try { res.end(); } catch (e) {} });
         up.on('error', function () { unregister(); try { res.end(); } catch (e) {} });
-        res.on('close', function () { closeConn(); unregister(); try { up.destroy(); } catch (e) {} });
+        res.on('close', stopUpstream);
     }); });
 });
 tee.on('clientError', function (e, sock) { try { sock.destroy(); } catch (x) {} });
