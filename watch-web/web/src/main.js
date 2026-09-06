@@ -219,6 +219,10 @@ let waitingTimer = null;
 const tvChip = () => tvState?.paused ? ["Paused on the TV", "warn"] : tvState?.buffering ? ["TV is loading", "warn"] : ["In sync", "ok"];
 video.addEventListener("waiting", () => { clearTimeout(waitingTimer); waitingTimer = setTimeout(() => { if (video.readyState < 3 && !video.paused) ui.setTv("Buffering", ""); }, 600); });
 video.addEventListener("playing", () => { clearTimeout(waitingTimer); ui.setTv(...tvChip()); });
+// A decoder failure (e.g. a browser whose HEVC hardware path is broken) never reaches the
+// pipeline: the element just drops its buffered ranges and sits at HAVE_METADATA. Say so.
+const MEDIA_ERR = { 1: "aborted", 2: "network error", 3: "decoding failed", 4: "format not supported" };
+video.addEventListener("error", () => { const e = video.error; if (!e) return; console.error("video error", e.code, e.message); ui.overlay(true, "Playback problem", `This browser could not decode the stream (${MEDIA_ERR[e.code] || e.code}${e.message ? `: ${e.message}` : ""}).`); });
 
 ui.onSound(() => { audioUnlocked = true; video.muted = false; ui.showSoundPrompt(false); if (tvState && !tvState.paused) video.play().catch(() => { video.muted = true; ui.showSoundPrompt(true); }); });
 video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.showSoundPrompt(true); }, { once: true });
@@ -265,7 +269,7 @@ window.__watch = () => {
   return {
     tv: tvState && { pos: tvState.positionSeconds, paused: tvState.paused, est: estimateTvPosition(tvState) },
     clock: relay.clock(),
-    video: { t: video.currentTime, paused: video.paused, rs: video.readyState, rate: video.playbackRate, muted: video.muted, w: video.videoWidth, h: video.videoHeight },
+    video: { t: video.currentTime, paused: video.paused, rs: video.readyState, rate: video.playbackRate, muted: video.muted, w: video.videoWidth, h: video.videoHeight, error: video.error && `${video.error.code} ${video.error.message}` },
     buffered: p?.buffered() || [],
     tracks: p?.tracks && { video: { codec: p.tracks.video.codec, codecString: p.tracks.video.codecString, hdr: p.tracks.video.hdr }, audios: p.tracks.audios.map(a => ({ id: a.id, lang: a.language, codec: a.codec, ch: a.channels, playable: a.playable })), duration: p.tracks.duration },
     selectedAudio: p?.selectedAudioId ?? null,
