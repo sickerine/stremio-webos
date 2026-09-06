@@ -11,6 +11,8 @@ services:
       # ISOLATE=1 adds COOP/COEP so jassub can use multithreaded libass. CDN fetches
       # are CORS requests, so they keep working under COEP.
       ISOLATE: ${ISOLATE:-0}
+      # Shared password for the site (set in .env). Empty = no login.
+      WATCH_PASSWORD: ${WATCH_PASSWORD:-}
     cpus: 0.5
     mem_limit: 256m
     healthcheck:

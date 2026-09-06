@@ -75,6 +75,7 @@ npm run build
 npm start                 # relay + built app on :3211
 # open http://localhost:3211/?room=home
 # ISOLATE=1 npm start     # cross-origin isolation for threaded libass
+# WATCH_PASSWORD=... npm start   # shared password; browsers get a permanent cookie, the TV socket is exempt
 ```
 
 Point the TV bridge at `ws://YOUR_IP:3211/ws`.

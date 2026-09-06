@@ -6,6 +6,8 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { loginPage } from "./login.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -61,7 +63,17 @@ function headRequest(url) {
   });
 }
 
-export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST, staleMs = 6000 } = {}) {
+// Optional password gate (WATCH_PASSWORD). One shared password, no usernames; a correct
+// POST /login sets a long-lived cookie that every page, API and viewer socket checks.
+// /health stays open (docker healthcheck) and so does the TV's own socket, which has no
+// way to log in; it can only publish playback state.
+const COOKIE = "watch_auth";
+const digest = s => createHash("sha256").update(s).digest();
+export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST, staleMs = 6000, password = process.env.WATCH_PASSWORD || "" } = {}) {
+  const token = password ? digest(`watch-web cookie:${password}`).toString("hex") : null;
+  const authed = req => !token || (req.headers.cookie || "").split(/;\s*/).includes(`${COOKIE}=${token}`);
+  const passwordOk = given => typeof given === "string" && timingSafeEqual(digest(given), digest(password));
+  const safeNext = n => (typeof n === "string" && /^\/(?!\/)/.test(n) ? n : "/");
   const rooms = new Map();
   const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null }); return rooms.get(id); };
   const send = (s, m) => { if (s.readyState === WebSocket.OPEN) s.send(JSON.stringify(m)); };
@@ -80,10 +92,23 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
   }, Math.max(20, staleMs / 3));
   sweeper.unref?.();
 
-  const httpServer = http.createServer((req, res) => {
+  const httpServer = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "GET" && url.pathname === "/health") {
       res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ ok: true, service: "stremio-watch-web" })); return;
+    }
+    if (token && req.method === "POST" && url.pathname === "/login") {
+      let body = ""; for await (const chunk of req) { body += chunk; if (body.length > 4096) { res.writeHead(413); res.end(); return; } }
+      const next = safeNext(url.searchParams.get("next"));
+      if (passwordOk(new URLSearchParams(body).get("password"))) {
+        res.writeHead(303, { location: next, "set-cookie": `${COOKIE}=${token}; Path=/; Max-Age=315360000; HttpOnly; SameSite=Lax`, "cache-control": "no-store" }); res.end(); return;
+      }
+      await new Promise(r => setTimeout(r, 500));                      // ponytail: fixed delay, not a per-IP limiter
+      res.writeHead(401, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); res.end(loginPage({ next, error: "That password is not right." })); return;
+    }
+    if (!authed(req)) {
+      if (req.method === "GET" && (req.headers.accept || "").includes("text/html")) { res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); res.end(loginPage({ next: url.pathname + url.search })); return; }
+      res.writeHead(401, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: false, error: "password required" })); return;
     }
     if (req.method === "GET" && url.pathname === "/status") {
       const out = {};
@@ -120,6 +145,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
     if (url.pathname !== "/ws" || !/^[a-z0-9_-]{1,64}$/i.test(roomId) || !["tv", "viewer"].includes(role)) {
       socket.write("HTTP/1.1 400 Bad Request\r\n\r\n"); socket.destroy(); return;
     }
+    if (role !== "tv" && !authed(req)) { socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n"); socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, ws => wss.emit("connection", ws, { roomId, role }));
   });
 
