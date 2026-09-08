@@ -87,3 +87,17 @@ npm test                                    # pure logic (sync, relay, byte sour
 node scripts/tv-sim.mjs                      # a TV simulator (URL=... POS=... PAUSED=1)
 node scripts/pw-diag.mjs <url> [s] [chromium|firefox]   # browser diagnostics
 ```
+
+## Public hostname (watch.khaslana.me)
+
+Quick tunnels (`cloudflared tunnel --url`) get a random trycloudflare.com name each run. For a
+fixed name the zone must be on Cloudflare DNS and the tunnel must be a named one:
+
+1. Cloudflare dashboard -> Add a domain -> `khaslana.me` (Free). Change the nameservers at the
+   registrar (Namecheap) to the two Cloudflare gives you; wait until the zone shows Active.
+2. Zero Trust -> Networks -> Tunnels -> Create a tunnel -> Cloudflared -> name it `watch`.
+   Copy the token from the install command (the long string after `--token`).
+3. Public Hostnames tab: subdomain `watch`, domain `khaslana.me`, service `HTTP` ->
+   `watch-web:3211` (the compose service name; the tunnel container shares its network).
+4. In `watch-web/.env`: `CF_TUNNEL_TOKEN=<token>` and `COMPOSE_PROFILES=tunnel`, then
+   `docker compose up -d`. Stop any `cloudflared tunnel --url` still running.
