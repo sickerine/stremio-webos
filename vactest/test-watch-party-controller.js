@@ -32,7 +32,7 @@ class FakeWebSocket {
         FakeWebSocket.instances.push(this);
     }
     addEventListener(name, listener) { (this.listeners[name] = this.listeners[name] || []).push(listener); }
-    emit(name) { (this.listeners[name] || []).forEach(listener => listener()); }
+    emit(name, event) { (this.listeners[name] || []).forEach(listener => listener(event)); }
     open() { this.readyState = FakeWebSocket.OPEN; this.emit('open'); }
     send(message) { this.sent.push(JSON.parse(message)); }
     close() { this.readyState = 3; }
@@ -83,6 +83,7 @@ socket.open();
 assert.strictEqual(socket.sent.length, 1, 'opening the socket publishes current state');
 const first = socket.sent[0];
 assert.strictEqual(first.type, 'state');
+assert.ok(Number.isFinite(first.state.sampledAtMs), 'TV captures the timestamp before sending');
 assert.strictEqual(first.state.positionSeconds, 12.5, 'bridge uses existing stabilized media clock while it is running');
 // A frozen clock (after a seek, a stall, or with no subtitle renderer) must NOT be
 // reported: viewers would see a TV that never advances. Fall back to the player's time.
@@ -104,7 +105,12 @@ assert.ok(socket.sent[1].state.sequence > first.state.sequence);
 
 video.emit('waiting');
 video.emit('stalled');
-assert.strictEqual(socket.sent.length, 2, 'buffering noise never generates sync commands');
+assert.strictEqual(socket.sent.length, 3, 'waiting is explicit state; network stalled alone does not mean playback stopped');
+assert.strictEqual(socket.sent[2].state.buffering, true);
+assert.strictEqual(socket.sent[2].state.event, 'waiting');
+video.emit('playing');
+assert.strictEqual(socket.sent[3].state.buffering, false);
+assert.strictEqual(socket.sent[3].state.event, 'playing');
 
 sandbox.window.__assCtl = null;
 intervals[0]();
@@ -114,13 +120,20 @@ sandbox.window.__assCtl = { video, clock: { now() { return 12.5; } } };
 intervals[0]();
 assert.strictEqual(transientIdle.cancelled, true, 'a fast player replacement cancels idle');
 transientIdle.callback();
-assert.strictEqual(socket.sent.length, 2, 'a cancelled idle transition sends nothing');
+assert.strictEqual(socket.sent.length, 4, 'a cancelled idle transition sends nothing');
 
 sandbox.window.__assCtl = null;
 intervals[0]();
 const confirmedIdle = timeouts.findLast(timer => timer.delay === 1500 && !timer.cancelled);
 confirmedIdle.callback();
-assert.strictEqual(socket.sent.length, 3, 'leaving playback publishes idle after the grace period');
-assert.deepStrictEqual(socket.sent[2], { type: 'idle', sessionId: first.state.sessionId });
+assert.strictEqual(socket.sent.length, 5, 'leaving playback publishes idle after the grace period');
+assert.strictEqual(socket.sent[4].type, 'idle');
+assert.strictEqual(socket.sent[4].sessionId, first.state.sessionId);
+assert.ok(Number.isFinite(socket.sent[4].sampledAtMs));
+assert.ok(socket.sent[4].sequence > socket.sent[3].state.sequence);
+socket.emit('message', { data: JSON.stringify({ type: 'clock-ping', t: 123 }) });
+assert.strictEqual(socket.sent[5].type, 'clock-pong');
+assert.strictEqual(socket.sent[5].t, 123);
+assert.ok(Number.isFinite(socket.sent[5].tvMs));
 
 console.log('watch-party controller tests passed');

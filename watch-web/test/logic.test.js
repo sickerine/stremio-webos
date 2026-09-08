@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateTvPosition, syncAction, isBuffered, tvJumped, tvStalled, bestOffset } from "../web/src/sync.js";
+import { estimateTvPosition, syncAction, isBuffered } from "../web/src/sync.js";
+import { bestOffset } from "../shared/clock.js";
 import { normalizeState, resolveRedirects, createRelayServer } from "../server/server.js";
 import { WebSocket } from "ws";
 import { ByteSource } from "../web/src/net/byte-source.js";
 
 test("TV position estimate advances only while playing and not buffering", () => {
-  const base = { positionSeconds: 100, paused: false, playbackRate: 1, receivedAtMs: 0 };
+  const base = { positionSeconds: 100, paused: false, playbackRate: 1, sampledAtMs: 0 };
   assert.equal(estimateTvPosition({ ...base }, 4000), 104);
   assert.equal(estimateTvPosition({ ...base, buffering: true }, 4000), 100);
   assert.equal(estimateTvPosition({ ...base, paused: true }, 4000), 100);
@@ -22,17 +23,6 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
   assert.equal(syncAction(100, 101.5, { snap: true }).type, "seek");
   assert.equal(syncAction(100, 100.2, { snap: true }).type, "none");     // playing: tolerate TV clock jitter after a seek
   assert.equal(syncAction(100, 100.2, { paused: true }).type, "seek");   // paused: land on the frame
-  // a "playing" TV whose position does not move between samples is loading
-  const s0 = { sessionId: "a", positionSeconds: 0.2, paused: false, receivedAtMs: 0 };
-  assert.ok(tvStalled(s0, { sessionId: "a", positionSeconds: 0.2, paused: false }, 500));
-  assert.ok(!tvStalled(s0, { sessionId: "a", positionSeconds: 0.7, paused: false }, 500));
-  assert.ok(!tvStalled(s0, { sessionId: "a", positionSeconds: 0.2, paused: false }, 200));
-  assert.ok(!tvStalled(s0, { sessionId: "a", positionSeconds: 0.2, paused: true }, 500));
-  const prev = { sessionId: "a", positionSeconds: 100, paused: false, playbackRate: 1, receivedAtMs: 0 };
-  assert.ok(!tvJumped(prev, { sessionId: "a", positionSeconds: 101.1, paused: false }, 1000));
-  assert.ok(tvJumped(prev, { sessionId: "a", positionSeconds: 130, paused: false }, 1000));
-  assert.ok(tvJumped(prev, { sessionId: "a", positionSeconds: 101, paused: true }, 1000));
-  assert.ok(!tvJumped(prev, { sessionId: "b", positionSeconds: 130, paused: false }, 1000));
   // clock sync trusts the fastest ping
   assert.equal(bestOffset([{ rtt: 40, offset: 10 }, { rtt: 12, offset: 3 }, { rtt: 90, offset: -20 }]), 3);
   assert.equal(bestOffset([]), null);
@@ -42,10 +32,10 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
 
 test("relay rejects garbage state and keeps only http(s) media urls", () => {
   assert.equal(normalizeState(null), null);
-  assert.equal(normalizeState({ sessionId: "a", sequence: 1, positionSeconds: -1 }), null);
-  const s = normalizeState({ sessionId: "a", sequence: 1, positionSeconds: 5, mediaUrl: "file:///x" });
+  assert.equal(normalizeState({ sessionId: "a", sequence: 1, sampledAtMs: Date.now(), positionSeconds: -1 }), null);
+  const s = normalizeState({ sessionId: "a", sequence: 1, sampledAtMs: Date.now(), positionSeconds: 5, mediaUrl: "file:///x" });
   assert.equal(s.mediaUrl, null);
-  assert.equal(normalizeState({ sessionId: "a", sequence: 1, positionSeconds: 5, mediaUrl: "https://cdn/x.mkv" }).mediaUrl, "https://cdn/x.mkv");
+  assert.equal(normalizeState({ sessionId: "a", sequence: 1, sampledAtMs: Date.now(), positionSeconds: 5, mediaUrl: "https://cdn/x.mkv" }).mediaUrl, "https://cdn/x.mkv");
 });
 
 test("resolver follows the torrentio -> torbox -> cdn chain and stops at 200", async () => {
@@ -114,9 +104,9 @@ test("relay marks a room idle when the TV stops heartbeating", async () => {
   const server = createRelayServer({ resolve: async url => ({ url, size: null }), staleMs: 120 });
   await server.listen(0, "127.0.0.1");
   const base = `ws://127.0.0.1:${server.address().port}/ws?room=t`;
-  const open = url => new Promise(ok => { const s = new WebSocket(url); s.on("open", () => ok(s)); });
+  const open = url => new Promise(ok => { const s = new WebSocket(url); s.on("message", data => { const m = JSON.parse(data); if (m.type === "clock-ping") s.send(JSON.stringify({ type: "clock-pong", t: m.t, tvMs: Date.now() })); }); s.on("open", () => ok(s)); });
   const tv = await open(`${base}&role=tv`);
-  tv.send(JSON.stringify({ type: "state", state: { sessionId: "s1", sequence: 1, positionSeconds: 5, mediaUrl: "http://x/y.mkv" } }));
+  tv.send(JSON.stringify({ type: "state", state: { sessionId: "s1", sequence: 1, sampledAtMs: Date.now(), positionSeconds: 5, mediaUrl: "http://x/y.mkv" } }));
   await new Promise(r => setTimeout(r, 30));
   const viewer = await open(`${base}&role=viewer`);
   const got = [];
@@ -126,4 +116,49 @@ test("relay marks a room idle when the TV stops heartbeating", async () => {
   assert.ok(got.includes("room-idle"), `expected room-idle, got ${got}`);
   viewer.close();
   await server.close();
+});
+
+
+test("TV capture time survives both network hops and different clocks for every timeline event", () => {
+  const capturedAt = 100000, tvOffset = 60000, viewerOffset = -30000;
+  const transit = 750;
+  for (const event of ["play", "pause", "seeking", "seeked", "ratechange", "waiting", "playing", "ended", "source", "heartbeat"]) {
+    const paused = event === "pause" || event === "ended";
+    const buffering = event === "waiting" || event === "seeking";
+    const s = normalizeState({ sessionId: "s", sequence: 1, event, sampledAtMs: capturedAt + tvOffset,
+      positionSeconds: 42, paused, buffering, playbackRate: 2 }, -tvOffset, capturedAt + 250);
+    assert.equal(s.sampledAtMs, capturedAt);
+    assert.equal(s.receivedAtMs, capturedAt + 250);
+    const local = { ...s, sampledAtMs: s.sampledAtMs + viewerOffset };
+    assert.equal(estimateTvPosition(local, capturedAt + viewerOffset + transit), paused || buffering ? 42 : 43.5, event);
+  }
+  assert.equal(normalizeState({ sessionId: "s", sequence: 1, positionSeconds: 1 }), null, "arrival time must not silently replace a missing capture time");
+  assert.equal(syncAction(41, 42, { playbackRate: 2 }).playbackRate, 2.12);
+  assert.equal(syncAction(41.6, 42, { snap: true }).type, "seek");
+  assert.equal(syncAction(41.6, 42).type, "rate", "subsequent heartbeats nudge instead of repeating the event seek");
+});
+
+test("relay calibrates the TV clock and rejects stale state after a timestamped stop", async () => {
+  const server = createRelayServer({ password: "", resolve: async url => ({ url, size: 1 }) });
+  await server.listen(0, "127.0.0.1");
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const tv = new WebSocket(base.replace("http:", "ws:") + "/ws?room=t&role=tv");
+  const tvSkew = 60000;
+  tv.on("message", data => { const m = JSON.parse(data); if (m.type === "clock-ping") tv.send(JSON.stringify({ type: "clock-pong", t: m.t, tvMs: Date.now() + tvSkew })); });
+  await new Promise(resolve => tv.once("open", resolve));
+  const state = { sessionId: "s", sequence: 1, positionSeconds: 12, sampledAtMs: Date.now() + tvSkew - 1000, event: "play", mediaUrl: "https://fixture/video" };
+  const read = async () => (await (await fetch(base + "/status")).json()).rooms.t.state;
+  try {
+    tv.send(JSON.stringify({ type: "state", state }));
+    let received;
+    for (let i = 0; i < 50; i++) { received = await read(); if (received) break; await new Promise(r => setTimeout(r, 20)); }
+    assert.ok(received, "clock exchange releases the pending state");
+    assert.ok(Math.abs(received.sampledAtMs - (state.sampledAtMs - tvSkew)) < 200);
+    assert.ok(received.receivedAtMs - received.sampledAtMs > 800, "the timestamp retains time spent before relay arrival");
+    tv.send(JSON.stringify({ type: "idle", sessionId: "s", sequence: 2, sampledAtMs: Date.now() + tvSkew }));
+    tv.send(JSON.stringify({ type: "state", state }));
+    // A ping/pong is a processing barrier for both preceding WebSocket messages.
+    await new Promise(resolve => { const listener = data => { if (JSON.parse(data).type === "pong") { tv.off("message", listener); resolve(); } }; tv.on("message", listener); tv.send(JSON.stringify({ type: "ping", t: Date.now() })); });
+    assert.equal(await read(), null, "a delayed pre-stop sample cannot restart the room");
+  } finally { tv.close(); await server.close(); }
 });

@@ -15,6 +15,7 @@
     var serverUrl = setting('watchPartyUrl', '');
     var socket = null;
     var video = null;
+    var buffering = false;
     var mediaUrl = null;
     var sessionId = null;
     var sourceRevision = 0;
@@ -60,8 +61,11 @@
         return isFinite(video.currentTime) && video.currentTime >= 0 ? video.currentTime : 0;
     }
 
-    function state() {
+    function state(event) {
         return {
+            sampledAtMs: Date.now(),
+            event: event || "heartbeat",
+            buffering: Boolean(buffering || (video && video.seeking)),
             sessionId: sessionId,
             sequence: ++sequence,
             sourceRevision: sourceRevision,
@@ -75,9 +79,9 @@
         };
     }
 
-    function publish() {
+    function publish(event) {
         if (!sessionId || !socket || socket.readyState !== WebSocket.OPEN) return;
-        try { socket.send(JSON.stringify({ type: 'state', state: state() })); } catch (error) {}
+        try { socket.send(JSON.stringify({ type: 'state', state: state(typeof event === "string" ? event : "heartbeat") })); } catch (error) {}
     }
 
     function publishIdle() {
@@ -85,8 +89,7 @@
         var stoppedSessionId = sessionId;
         sessionId = null;
         mediaUrl = null;
-        sequence = 0;
-        try { socket.send(JSON.stringify({ type: 'idle', sessionId: stoppedSessionId })); } catch (error) {}
+        try { socket.send(JSON.stringify({ type: 'idle', sessionId: stoppedSessionId, sampledAtMs: Date.now(), sequence: ++sequence })); } catch (error) {}
     }
 
     function cancelIdle() {
@@ -107,8 +110,10 @@
 
     function playerEvent(name) {
         return function () {
+            if (name === 'waiting') buffering = true;
+            if (name === 'playing' || name === 'seeked') buffering = false;
+            publish(name);
             if (name === 'ended') scheduleIdle();
-            else publish();
         };
     }
 
@@ -125,8 +130,9 @@
         if (nextVideo === video) return;
         detach();
         video = nextVideo;
+        buffering = false;
         if (!video) return;
-        ['play', 'pause', 'seeked', 'ratechange', 'ended']
+        ['play', 'pause', 'seeking', 'seeked', 'ratechange', 'waiting', 'playing', 'ended']
             .forEach(function (name) {
                 listeners[name] = playerEvent(name);
                 video.addEventListener(name, listeners[name]);
@@ -139,7 +145,7 @@
         sourceRevision += 1;
         sequence = 0;
         sessionId = Date.now().toString(36) + '-' + sourceRevision.toString(36);
-        publish();
+        publish("source");
     }
 
     function tick() {
@@ -159,7 +165,7 @@
         // After a seek the ASS clock is frozen until webOS currentTime stops bouncing;
         // the moment it re-locks, send the accurate position so viewers land on it.
         var settling = Boolean(controller && controller._seeking);
-        if (wasSettling && !settling) publish();
+        if (wasSettling && !settling) publish("seeked");
         wasSettling = settling;
         var now = Date.now();
         if (sessionId && now - lastHeartbeat >= 500) {
@@ -175,6 +181,10 @@
         try { socket = new WebSocket(serverUrl + separator + 'role=tv'); }
         catch (error) { reconnectTimer = setTimeout(connect, 2000); return; }
         socket.addEventListener('open', publish);
+        socket.addEventListener('message', function (event) {
+            var msg; try { msg = JSON.parse(event.data); } catch (error) { return; }
+            if (msg.type === 'clock-ping') socket.send(JSON.stringify({ type: 'clock-pong', t: msg.t, tvMs: Date.now() }));
+        });
         socket.addEventListener('close', function () {
             socket = null;
             reconnectTimer = setTimeout(connect, 2000);
