@@ -2,7 +2,7 @@
 // Video and browser-native audio are COPIED (passthrough, no re-encode). The file's
 // own timestamps are kept, so MSE buffered ranges are real media time and a TV
 // position maps 1:1. Dolby/DTS audio, which no browser can decode, is decoded via a
-// mediabunny extension and re-encoded to Opus in-browser (the only track that costs
+// mediabunny extension and re-encoded to Opus or AAC in-browser (the only track that costs
 // CPU, and audio is cheap).
 import {
   Input, Output, MATROSKA, Mp4OutputFormat, AppendOnlyStreamTarget, StreamSource, canEncodeAudio,
@@ -21,7 +21,7 @@ const AHEAD_BYTES = 120 * 1024 * 1024;   // ...nor more than this: Chrome's MSE 
                                           // makes it evict from the tail, which the buffered-range check can't see
 const BEHIND_SECONDS = 45;     // evict buffer older than this
 const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
-const OPUS_BITRATE = 256_000;
+const AUDIO_BITRATE = 256_000;
 
 function toStereo(sample) {
   const ch = sample.numberOfChannels, frames = sample.numberOfFrames;
@@ -31,8 +31,15 @@ function toStereo(sample) {
 }
 function mime(v, a) { return `video/mp4; codecs="${[v, a].filter(Boolean).join(", ")}"`; }
 
-let opusOk = null;
-async function opusEncodable() { if (opusOk == null) opusOk = await canEncodeAudio("opus", { numberOfChannels: 2, sampleRate: 48000 }).catch(() => false); return opusOk; }
+export async function selectAudioEncoder(MediaSource, videoCodec, canEncode = canEncodeAudio) {
+  // Safari can encode Opus but rejects it in an MP4 SourceBuffer. Both ends of
+  // the transcode must agree; AAC is its supported stereo output.
+  for (const output of [{ codec: "opus", codecString: "opus" }, { codec: "aac", codecString: "mp4a.40.2" }]) {
+    if (MediaSource.isTypeSupported(mime(videoCodec, output.codecString)) &&
+        await canEncode(output.codec, { numberOfChannels: 2, sampleRate: 48000, bitrate: AUDIO_BITRATE }).catch(() => false)) return output;
+  }
+  return null;
+}
 
 export class Pipeline {
   constructor(video, { onTracks, onStatus, onError } = {}) {
@@ -65,19 +72,20 @@ export class Pipeline {
 
     const vCodec = await video.getCodecParameterString();
     const vOk = vCodec ? this.MediaSource.isTypeSupported(mime(vCodec)) : false;
-    const opus = await opusEncodable();
+    const encoder = await selectAudioEncoder(this.MediaSource, vCodec);
     const audioInfos = [];
     for (const a of audios) {
       const codecString = await a.getCodecParameterString().catch(() => null);
       // MSE claims to support a codec string regardless of channel count, but Chromium's
       // fMP4 parser fails on >2ch AAC/FLAC passthrough (CHUNK_DEMUXER_ERROR_APPEND_FAILED).
-      // So only pass through <=2ch directly; downmix anything wider to stereo Opus, the
-      // same path Dolby/DTS already use. `supported` implies WebCodecs can decode it too.
+      // Safari can play Dolby audio natively, including surround. Keep that path
+      // when advertised; only use the software decoder when playback needs it.
       const supported = codecString ? this.MediaSource.isTypeSupported(mime(vCodec || "avc1.640028", codecString)) : false;
       const ch = a.numberOfChannels || 2;
-      const direct = supported && ch <= 2;
-      const transcode = !direct && opus && (TRANSCODABLE.has(a.codec) || supported);
+      const direct = supported && (ch <= 2 || a.codec === "ac3" || a.codec === "eac3");
+      const transcode = Boolean(!direct && encoder && (TRANSCODABLE.has(a.codec) || supported));
       audioInfos.push({ id: a.id, track: a, codec: a.codec, codecString, language: a.languageCode, name: a.name, channels: a.numberOfChannels,
+        outputCodec: transcode ? encoder.codec : a.codec, outputCodecString: transcode ? encoder.codecString : codecString,
         playable: direct || transcode, direct, transcode, isDefault: Boolean(a.disposition?.default) });
     }
     this.tracks = {
@@ -102,7 +110,7 @@ export class Pipeline {
     await this._cancelRun();
     this.selectedAudioId = audioId;
     const audio = this.tracks.audios.find(a => a.id === audioId) || null;
-    const audioMime = audio ? (audio.transcode ? "opus" : audio.codecString) : null;
+    const audioMime = audio?.outputCodecString ?? null;
     const codecs = mime(this.tracks.video.codecString, audioMime);
 
     if (!this.mediaSource) {
@@ -138,7 +146,7 @@ export class Pipeline {
     if (audio) {
       // WebCodecs Opus only encodes mono/stereo, so downmix 5.1/7.1 to stereo.
       aSrc = audio.transcode
-        ? new AudioSampleSource({ codec: "opus", bitrate: OPUS_BITRATE, transform: { numberOfChannels: 2, sampleRate: 48000 } })
+        ? new AudioSampleSource({ codec: audio.outputCodec, bitrate: AUDIO_BITRATE, transform: { numberOfChannels: 2, sampleRate: 48000 } })
         : new EncodedAudioPacketSource(audio.codec);
       output.addAudioTrack(aSrc);
     }
@@ -155,7 +163,7 @@ export class Pipeline {
     if (!vKey) throw new Error("No keyframe found");
     const vCfg = await v.getDecoderConfig();
 
-    // Audio: passthrough (encoded packets) or transcode (decoded samples -> Opus).
+    // Audio: passthrough (encoded packets) or transcode to the negotiated codec.
     const aTrack = audio?.track || null;
     const transcode = Boolean(audio?.transcode);
     const packetSink = aTrack && !transcode ? new EncodedPacketSink(aTrack) : null;
