@@ -210,6 +210,7 @@ setInterval(() => {
   const recent = src.log.filter(e => e.t > netlogSent); netlogSent = Date.now();
   const p = session.pipeline, a = p.tracks?.audios.find(x => x.id === p.selectedAudioId);
   relay.send({ type: "netlog", data: { host: (() => { try { return new URL(src.url).host; } catch { return "?"; } })(), requests: src.requests, retries: src.retries, MB: +(src.bytesFetched / 1048576).toFixed(0),
+    cachedChunks: src.order.length, cacheLimitMB: src.maxCachedChunks * src.chunkSize / 1048576,
     t: video.currentTime.toFixed(1), tv: tvState && +estimateTvPosition(tvState).toFixed(1), paused: video.paused, rs: video.readyState, buffered: p.buffered().map(r => r.map(x => +x.toFixed(0))),
     video: p.tracks && `${p.tracks.video.codec} ${p.tracks.video.width}x${p.tracks.video.height}`, audio: a && `${a.codec} ${a.channels}ch ${a.transcode ? "transcode" : "direct"}`, audios: p.tracks?.audios.map(x => `${x.codec}:${x.playable ? "ok" : "no"}`),
     feed: p.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, startAt: +p.run.startAt.toFixed(1) }, starts: p.startCount || 0, opens: session.opens || 0, stage: ui.el.overlay.hidden ? null : ui.el.ovTitle.textContent,

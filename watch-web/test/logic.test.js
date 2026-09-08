@@ -87,6 +87,29 @@ test("ByteSource streams sequential reads over one Range request and tees bytes 
   src.dispose();
 });
 
+test("ByteSource bounds requests and cache while reading across windows and the final partial chunk", async () => {
+  const file = Uint8Array.from({ length: 1031 }, (_, i) => i % 251);
+  const ranges = [];
+  const src = new ByteSource("https://x/file", { size: file.length, chunkSize: 32, maxCachedChunks: 3, rangeBytes: 128, prefetchAhead: 0,
+    fetchImpl: async (_url, { headers }) => {
+      const [, a, b] = /bytes=(\d+)-(\d*)/.exec(headers.Range);
+      assert.notEqual(b, "", "every response must have a bounded length");
+      const start = +a, end = +b;
+      assert.ok(end - start + 1 <= 128);
+      ranges.push([start, end]);
+      return new Response(file.slice(start, end + 1), { status: 206 });
+    },
+  });
+  try {
+    for (let i = 0; i < file.length; i += 17) {
+      assert.deepEqual(await src.read(i, Math.min(i + 17, file.length)), file.slice(i, i + 17));
+      assert.ok(src.order.length <= 3, "resolved cache stays within its budget");
+    }
+    assert.equal(ranges.length, 9, "window boundaries continue without extra seek requests");
+    assert.equal(src.retries, 0, "a completed window is not a short read");
+  } finally { src.dispose(); }
+});
+
 test("relay marks a room idle when the TV stops heartbeating", async () => {
   const server = createRelayServer({ resolve: async url => ({ url, size: null }), staleMs: 120 });
   await server.listen(0, "127.0.0.1");
