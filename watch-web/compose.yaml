@@ -30,7 +30,7 @@ services:
     profiles: ["tunnel"]
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
     depends_on:
       watch-web:
         condition: service_healthy
