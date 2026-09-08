@@ -16,10 +16,11 @@ import { ByteSource } from "../net/byte-source.js";
 registerAc3Decoder();   // AC-3 + E-AC-3
 registerDtsDecoder();   // DTS (incl. DTS-HD core)
 
-const AHEAD_SECONDS = 90;      // don't mux more than this ahead of the playhead...
-const AHEAD_BYTES = 120 * 1024 * 1024;   // ...nor more than this: Chrome's MSE quota is ~150 MB of video, and over-feeding
-                                          // makes it evict from the tail, which the buffered-range check can't see
-const BEHIND_SECONDS = 45;     // evict buffer older than this
+const DESKTOP_BUFFER = { aheadSeconds: 90, aheadBytes: 120 * 1024 * 1024, behindSeconds: 45 };
+// Leave memory for 4K decoding on phones; the raw file cache and MSE buffer
+// coexist. Cap response size too, independently of fetch reader backpressure.
+const MANAGED_BUFFER = { aheadSeconds: 15, aheadBytes: 24 * 1024 * 1024, behindSeconds: 5,
+  maxCachedChunks: 4, prefetchAhead: 1, rangeBytes: 32 * 1024 * 1024 };
 const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
 const AUDIO_BITRATE = 256_000;
 
@@ -45,6 +46,7 @@ export class Pipeline {
   constructor(video, { onTracks, onStatus, onError } = {}) {
     this.video = video;
     this.MediaSource = globalThis.MediaSource || globalThis.ManagedMediaSource;
+    this.bufferPolicy = this.MediaSource && this.MediaSource === globalThis.ManagedMediaSource ? MANAGED_BUFFER : DESKTOP_BUFFER;
     this.onTracks = onTracks; this.onStatus = onStatus; this.onError = onError;
     this.source = null; this.input = null;
     this.mediaSource = null; this.sourceBuffer = null;
@@ -81,7 +83,7 @@ export class Pipeline {
   async open(cdnUrl, { tee, size } = {}) {
     await this.close();
     if (!this.MediaSource) throw new Error("This browser does not support MediaSource or ManagedMediaSource streaming.");
-    const source = new ByteSource(cdnUrl, { size });
+    const source = new ByteSource(cdnUrl, { size, ...this.bufferPolicy });
     if (tee) source.setTee(tee);
     this.source = source;
     const fileSize = await source.getSize();
@@ -142,7 +144,8 @@ export class Pipeline {
       this.mediaSource = new this.MediaSource();
       this.video.__pipeline = this;                                   // whoever attached last owns the element
       const opened = new Promise(r => this.mediaSource.addEventListener("sourceopen", r, { once: true }));
-      this.video.src = URL.createObjectURL(this.mediaSource);
+      this.sourceUrl = URL.createObjectURL(this.mediaSource);
+      this.video.src = this.sourceUrl;
       this.video.load();
       if (this.MediaSource === globalThis.ManagedMediaSource) {
         this.priming = true;
@@ -210,7 +213,8 @@ export class Pipeline {
       while (!run.cancelled) {
         const fed = lastTs - startAt;
         const rate = fed > 4 ? (this.source.bytesFetched - bytes0) / fed : 0;   // bytes per media second
-        const limit = Math.max(8, rate > 0 ? Math.min(AHEAD_SECONDS, AHEAD_BYTES / rate) : AHEAD_SECONDS);
+        const { aheadSeconds, aheadBytes } = this.bufferPolicy;
+        const limit = Math.max(4, rate > 0 ? Math.min(aheadSeconds, aheadBytes / rate) : aheadSeconds);
         if (lastTs - this.video.currentTime < limit) return;
         await new Promise(r => setTimeout(r, 250));
       }
@@ -278,7 +282,7 @@ export class Pipeline {
   buffered() { const b = this._ranges(); const out = []; if (b) for (let i = 0; i < b.length; i++) out.push([b.start(i), b.end(i)]); return out; }
   _evict(force = false) {
     const sb = this.sourceBuffer, b = this._ranges(); if (!sb || sb.updating || !b || !b.length) return;
-    const t = this.video.currentTime, keep = force ? 10 : BEHIND_SECONDS;
+    const t = this.video.currentTime, keep = Math.min(force ? 10 : Infinity, this.bufferPolicy.behindSeconds);
     if (b.start(0) < t - keep - 5) { try { sb.remove(0, t - keep); } catch {} }
   }
   async _cancelRun() {
@@ -310,6 +314,7 @@ export class Pipeline {
     this.priming = false; this.playRequested = false; this.needsPlaybackGesture = false;
     // Only tear down the element if no newer pipeline has attached to it since.
     if (this.video.__pipeline === this) { this.video.__pipeline = null; try { this.video.removeAttribute("src"); this.video.load(); } catch {} }
+    if (this.sourceUrl) { URL.revokeObjectURL(this.sourceUrl); this.sourceUrl = null; }
     this.input?.dispose(); this.input = null;
     this.source?.dispose(); this.source = null;
     this.tracks = null; this.selectedAudioId = null;

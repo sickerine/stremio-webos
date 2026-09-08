@@ -5,6 +5,7 @@
 // pieces as it streams in, the way a <video> element downloads. That keeps the request
 // rate at "one per seek": TorBox's edge nodes firewall an IP that issues a Range
 // request every few MiB (a few per second at 4K bitrates) for a couple of hours.
+// Memory-constrained players use bounded, multi-chunk response windows instead.
 // Random reads (header, cues, a seek) start a new stream at that offset. Every byte
 // is also handed, in file order, to an optional tee (the subtitle parser), so the
 // subtitle track never needs a second download of the file.
@@ -23,9 +24,12 @@ class Deferred {
 }
 
 export class ByteSource {
-  constructor(url, { chunkSize = CHUNK, fetchImpl = (...a) => globalThis.fetch(...a), size = null } = {}) {
+  constructor(url, { chunkSize = CHUNK, fetchImpl = (...a) => globalThis.fetch(...a), size = null, maxCachedChunks = MAX_CACHED_CHUNKS, prefetchAhead = PREFETCH_AHEAD, rangeBytes = Infinity } = {}) {
     this.url = url;
     this.chunkSize = chunkSize;
+    this.maxCachedChunks = maxCachedChunks;
+    this.prefetchAhead = prefetchAhead;
+    this.rangeBytes = Number.isFinite(rangeBytes) ? Math.max(chunkSize, Math.floor(rangeBytes / chunkSize) * chunkSize) : Infinity;
     this.fetchImpl = fetchImpl;
     this.size = size > 0 ? size : null;   // hint from the relay, if it had one
     this.chunks = new Map();     // chunkIndex -> Promise<Uint8Array> (resolved, or being filled)
@@ -84,8 +88,9 @@ export class ByteSource {
   }
   _want(index) { const s = this.stream; if (s && index > s.wanted) { s.wanted = index; s.wake?.(); } }
   _settled(index) {
+    this.order = this.order.filter(i => i !== index);
     this.order.push(index);
-    while (this.order.length > MAX_CACHED_CHUNKS) this.chunks.delete(this.order.shift());
+    while (this.order.length > this.maxCachedChunks) this.chunks.delete(this.order.shift());
   }
 
   // A seek: abandon the open stream and start reading from `index`. Chunks someone is
@@ -109,23 +114,27 @@ export class ByteSource {
   async _run(s) {
     let attempt = 0, lastError = null;
     const live = () => this.stream === s;
-    const pause = async () => { while (live() && s.next > s.wanted + PREFETCH_AHEAD) { await new Promise(r => { s.wake = r; }); s.wake = null; } };
+    const pause = async () => { while (live() && s.next > s.wanted + this.prefetchAhead) { await new Promise(r => { s.wake = r; }); s.wake = null; } };
     while (live() && s.next * this.chunkSize < this.size) {
       await pause(); if (!live()) return;
       try {
         const start = s.next * this.chunkSize, t0 = Date.now();
+        // Bound mobile responses even if the browser reads ahead while our reader
+        // is paused. Large windows avoid a request for every cached chunk.
+        const end = Math.min(this.size, start + this.rangeBytes);
         let res;
-        try { res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-` }, signal: s.abort.signal }); }
+        try { res = await this.fetchImpl(this.url, { headers: { Range: `bytes=${start}-${Number.isFinite(this.rangeBytes) ? end - 1 : ""}` }, signal: s.abort.signal }); }
         catch (e) { this._log("stream", start, e.message, t0); throw e; }
         this.requests++; this._log("stream", start, res.status, t0);
-        if (!(res.status === 206 || (res.status === 200 && start === 0))) throw new Error(`Range fetch failed: ${res.status}`);
+        if (!(res.status === 206 || (res.status === 200 && start === 0 && !Number.isFinite(this.rangeBytes)))) throw new Error(`Range fetch failed: ${res.status}`);
         const reader = res.body.getReader();
         let buf = new Uint8Array(this.chunkSize), fill = 0;
         while (live()) {
           const { value, done } = await reader.read();
           if (done) {
             if (fill > 0 && start >= 0 && s.next * this.chunkSize + fill === this.size) { this._emit(s, buf.subarray(0, fill)); }
-            else if (s.next * this.chunkSize < this.size) throw new Error(`short read at chunk ${s.next}`);
+            else if (s.next * this.chunkSize < end) throw new Error(`short read at chunk ${s.next}`);
+            if (end < this.size) break;                                    // next bounded window
             this.stream = null; return;                                     // reached end of file
           }
           let off = 0;
@@ -141,7 +150,7 @@ export class ByteSource {
           }
         }
         try { await reader.cancel(); } catch {}
-        return;                                                             // superseded by a seek
+        if (!live()) return;                                                // superseded by a seek
       } catch (e) {
         if (!live() || s.abort.signal.aborted) return;
         lastError = e; attempt++; this.retries++;
@@ -159,7 +168,7 @@ export class ByteSource {
   _emit(s, bytes) {
     const index = s.next++;
     const start = index * this.chunkSize;
-    const copy = bytes.slice();                                            // buf is reused; hand out a stable copy
+    const copy = bytes;                                                    // caller allocates a new buffer after every emit
     this.bytesFetched += copy.byteLength;
     this._teeMaybe(start, copy);
     const d = this._reserve(s, index);
@@ -197,7 +206,7 @@ export class ByteSource {
     const last = Math.floor((end - 1) / this.chunkSize);
     const pending = [];
     for (let i = first; i <= last; i++) pending.push(this._fetchChunk(i));
-    this._want(Math.min(last + PREFETCH_AHEAD, Math.ceil(this.size / this.chunkSize) - 1));
+    this._want(last);
     const parts = await Promise.all(pending);
     if (parts.length === 1) {
       const off = start - first * this.chunkSize;
