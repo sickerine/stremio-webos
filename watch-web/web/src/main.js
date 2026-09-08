@@ -73,6 +73,7 @@ const queueStart = (id, cdnUrl, size) => queued(() => startSession(id, cdnUrl, s
 
 async function endSession() {
   const s = session; session = null;
+  ui.showSoundPrompt(false);
   if (!s) return;
   await s.ass.hide(); s.text.hide(); s.bitmap.hide(); s.demux.dispose();
   await s.pipeline.close();
@@ -100,6 +101,7 @@ async function startSession(sessionId, cdnUrl, size) {
   });
   s.pipeline = new Pipeline(video, {
     onTracks: t => { renderAudioMenu(); ui.setStats(`${t.video.height}p${t.video.hdr ? " HDR" : ""}`); },
+    onStatus: status => { if (session === s && status.phase === "playback-blocked") ui.showSoundPrompt(true, true); },
     onError: e => { console.error(e); if (session === s) ui.overlay(true, "Playback problem", e.message); },
   });
   session = s;
@@ -165,7 +167,10 @@ async function follow() {
   if (Date.now() < tvState.holdUntil) return;          // a jump just arrived; wait for the next sample to confirm it
   const target = estimateTvPosition(tvState);
   const hold = tvState.paused || tvState.buffering;          // TV sits on a frame: paused, or "playing" but not advancing
-  if (hold) { if (!video.paused) video.pause(); }
+  // Let Safari decode its first frame before enforcing the TV's paused state.
+  // Pausing during startup can put it back into metadata-only loading.
+  if (video.readyState >= 2) s.pipeline.priming = false;
+  if (hold) { if (!video.paused && !s.pipeline.priming) video.pause(); }
   else if (video.paused && video.readyState >= 2) { video.play().catch(() => {}); }
 
   const act = syncAction(video.currentTime, target, { paused: hold, snap: Date.now() < tvState.snapUntil });
@@ -193,7 +198,7 @@ async function follow() {
     }
   } else video.playbackRate = act.playbackRate;
 
-  if (video.readyState >= 3 && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) { ui.setStage("done"); ui.overlay(false); }
+  if (video.readyState >= (hold ? 2 : 3) && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) { ui.setStage("done"); ui.overlay(false); }
   else if (video.readyState < 3 && s.pipeline.isBuffered(target) === false && ui.el.overlay.hidden) { /* stalled; leave player visible */ }
 }
 setInterval(follow, 250);
@@ -208,6 +213,7 @@ setInterval(() => {
     t: video.currentTime.toFixed(1), tv: tvState && +estimateTvPosition(tvState).toFixed(1), paused: video.paused, rs: video.readyState, buffered: p.buffered().map(r => r.map(x => +x.toFixed(0))),
     video: p.tracks && `${p.tracks.video.codec} ${p.tracks.video.width}x${p.tracks.video.height}`, audio: a && `${a.codec} ${a.channels}ch ${a.transcode ? "transcode" : "direct"}`, audios: p.tracks?.audios.map(x => `${x.codec}:${x.playable ? "ok" : "no"}`),
     feed: p.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, startAt: +p.run.startAt.toFixed(1) }, starts: p.startCount || 0, opens: session.opens || 0, stage: ui.el.overlay.hidden ? null : ui.el.ovTitle.textContent,
+    source: { type: p.mediaSource?.constructor.name, state: p.mediaSource?.readyState, priming: p.priming, gesture: p.needsPlaybackGesture },
     subs: { sel: session.selectedSub, ass: session.ass.activeTrack, assPushed: session.ass.pushed, assDupes: session.ass.dupes || 0, textDupes: session.text.dupes, textCues: session.text.active != null ? (session.text.tracks.get(session.text.active)?.cues?.length ?? null) : null, streams: session.demux.stats.streamsOpened, cues: session.demux.stats.cues },
     recent: recent.map(e => [new Date(e.t).toISOString().slice(11, 23), e.k, e.s, e.st, e.ms]) } });
 }, 10000);
@@ -224,7 +230,15 @@ video.addEventListener("playing", () => { clearTimeout(waitingTimer); ui.setTv(.
 const MEDIA_ERR = { 1: "aborted", 2: "network error", 3: "decoding failed", 4: "format not supported" };
 video.addEventListener("error", () => { const e = video.error; if (!e) return; console.error("video error", e.code, e.message); ui.overlay(true, "Playback problem", `This browser could not decode the stream (${MEDIA_ERR[e.code] || e.code}${e.message ? `: ${e.message}` : ""}).`); });
 
-ui.onSound(() => { audioUnlocked = true; video.muted = false; ui.showSoundPrompt(false); if (tvState && !tvState.paused) video.play().catch(() => { video.muted = true; ui.showSoundPrompt(true); }); });
+ui.onSound(() => {
+  if (session?.pipeline.needsPlaybackGesture) {
+    ui.showSoundPrompt(false);
+    session.pipeline.requestPlayback();
+    return;
+  }
+  audioUnlocked = true; video.muted = false; ui.showSoundPrompt(false);
+  if (tvState && !tvState.paused) video.play().catch(() => { video.muted = true; ui.showSoundPrompt(true); });
+});
 video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.showSoundPrompt(true); }, { once: true });
 
 const relay = connectRelay({

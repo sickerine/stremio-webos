@@ -1,7 +1,7 @@
 // Browser-side media pipeline: CDN bytes -> mediabunny demux -> fMP4 -> MediaSource.
 // Video and browser-native audio are COPIED (passthrough, no re-encode). The file's
 // own timestamps are kept, so MSE buffered ranges are real media time and a TV
-// position maps 1:1. Dolby/DTS audio, which no browser can decode, is decoded via a
+// position maps 1:1. Audio without native playback support is decoded via a
 // mediabunny extension and re-encoded to Opus or AAC in-browser (the only track that costs
 // CPU, and audio is cheap).
 import {
@@ -53,6 +53,28 @@ export class Pipeline {
     this.selectedAudioId = null;
     this.appendQueue = Promise.resolve();
     this.pendingFirstAppend = null;
+    this.priming = false;
+    this.playRequested = false;
+    this.needsPlaybackGesture = false;
+  }
+
+  requestPlayback() {
+    if (this.playRequested || this.video.__pipeline !== this) return;
+    const source = this.mediaSource;
+    this.playRequested = true;
+    this.needsPlaybackGesture = false;
+    // Do not await play(): it resolves only after data arrives, but on iPhone the
+    // request itself can be needed to open the source that will receive that data.
+    this.video.play().then(() => {
+      if (this.mediaSource === source) this.playRequested = false;
+    }).catch(error => {
+      if (this.mediaSource !== source) return;
+      this.playRequested = false;
+      if (error.name === "NotAllowedError") {
+        this.needsPlaybackGesture = true;
+        this.onStatus?.({ phase: "playback-blocked" });
+      } else if (error.name !== "AbortError") this.onError?.(error);
+    });
   }
 
   // ---- open a file: probe tracks, decide what's playable ----
@@ -122,6 +144,10 @@ export class Pipeline {
       const opened = new Promise(r => this.mediaSource.addEventListener("sourceopen", r, { once: true }));
       this.video.src = URL.createObjectURL(this.mediaSource);
       this.video.load();
+      if (this.MediaSource === globalThis.ManagedMediaSource) {
+        this.priming = true;
+        this.requestPlayback();
+      }
       await opened;
       this.mediaSource.duration = this.tracks.duration;
       this.sourceBuffer = this.mediaSource.addSourceBuffer(codecs);
@@ -144,7 +170,7 @@ export class Pipeline {
     output.addVideoTrack(vSrc);
     let aSrc = null;
     if (audio) {
-      // WebCodecs Opus only encodes mono/stereo, so downmix 5.1/7.1 to stereo.
+      // Keep converted audio stereo for predictable channel mapping.
       aSrc = audio.transcode
         ? new AudioSampleSource({ codec: audio.outputCodec, bitrate: AUDIO_BITRATE, transform: { numberOfChannels: 2, sampleRate: 48000 } })
         : new EncodedAudioPacketSource(audio.codec);
@@ -281,6 +307,7 @@ export class Pipeline {
     await this._cancelRun();
     if (this.mediaSource) { try { if (this.mediaSource.readyState === "open") this.mediaSource.endOfStream(); } catch {} }
     this.mediaSource = null; this.sourceBuffer = null;
+    this.priming = false; this.playRequested = false; this.needsPlaybackGesture = false;
     // Only tear down the element if no newer pipeline has attached to it since.
     if (this.video.__pipeline === this) { this.video.__pipeline = null; try { this.video.removeAttribute("src"); this.video.load(); } catch {} }
     this.input?.dispose(); this.input = null;
