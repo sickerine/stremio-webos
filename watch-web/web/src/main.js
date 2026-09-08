@@ -14,7 +14,7 @@ video.muted = true;
 
 let tvState = null;              // last TV sample, in the viewer clock
 let pendingCorrection = null;
-const syncStats = { seeks: 0, remuxes: 0, waits: 0 };
+const syncStats = { seeks: 0, remuxes: 0, waits: 0, rateChanges: 0 };
 let session = null;              // { id, cdnUrl, pipeline, demux, ass, text, subTracks, selectedSub }
 let audioUnlocked = false;
 let seeking = false;
@@ -162,6 +162,7 @@ async function selectSub(number, user) {
 }
 
 // ---- follow the TV ----
+function setPlaybackRate(rate) { if (video.playbackRate !== rate) video.playbackRate = rate; }
 async function follow() {
   const s = session; if (!s || !tvState || s.id !== tvState.sessionId || seeking) return;
   if (!s.pipeline.sourceBuffer) return;
@@ -175,7 +176,8 @@ async function follow() {
   if (hold) { if (!video.paused && !s.pipeline.priming) video.pause(); }
   else if (video.paused && video.readyState >= 2) { video.play().catch(() => {}); }
 
-  const act = syncAction(video.currentTime, target, { paused: hold, snap: Boolean(correction), playbackRate });
+  const act = syncAction(video.currentTime, target, { paused: hold, snap: Boolean(correction), playbackRate,
+    rateCorrection: s.pipeline.MediaSource !== globalThis.ManagedMediaSource });
   if (act.type === "seek") {
     // If the target is already buffered, jump instantly. Otherwise a hard seek means
     // re-muxing from there, which clears the buffer; don't do that again until the
@@ -187,9 +189,9 @@ async function follow() {
       seeking = true;
       syncStats.seeks++;
       try { await s.pipeline.seekTo(target); if (pendingCorrection === correction) pendingCorrection = null; } finally { seeking = false; }
-      video.playbackRate = playbackRate;
+      setPlaybackRate(playbackRate);
     } else if (feedIsClose) {
-      video.playbackRate = playbackRate;                          // the running mux reaches the target in a moment; restarting would only add a cold start
+      setPlaybackRate(playbackRate);                          // the running mux reaches the target in a moment; restarting would only add a cold start
     } else if (Date.now() - lastRemuxAt > REMUX_COOLDOWN_MS) {
       lastRemuxAt = Date.now();
       seeking = true;
@@ -199,12 +201,12 @@ async function follow() {
         if (session === s && tvState?.sessionId === s.id) video.currentTime = estimateTvPosition(tvState);
         if (pendingCorrection === correction) pendingCorrection = null;
       } finally { seeking = false; }
-      video.playbackRate = playbackRate;
+      setPlaybackRate(playbackRate);
     } else {
       // waiting for the in-flight re-mux to reach the target; nudge toward it
-      video.playbackRate = playbackRate;
+      setPlaybackRate(playbackRate);
     }
-  } else { video.playbackRate = act.playbackRate; if (pendingCorrection === correction) pendingCorrection = null; }
+  } else { setPlaybackRate(act.playbackRate); if (pendingCorrection === correction) pendingCorrection = null; }
 
   if (video.readyState >= (hold ? 2 : 3) && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) { ui.setStage("done"); ui.overlay(false); }
   else if (video.readyState < 3 && s.pipeline.isBuffered(target) === false && ui.el.overlay.hidden) { /* stalled; leave player visible */ }
@@ -233,6 +235,7 @@ for (const ev of ["seeked", "pause", "timeupdate"]) video.addEventListener(ev, (
 // Status chip: "Buffering" only if a stall outlasts a seek's blip, so landings don't flash it.
 let waitingTimer = null;
 video.addEventListener("waiting", () => { syncStats.waits++; });
+video.addEventListener("ratechange", () => { syncStats.rateChanges++; });
 const tvChip = () => tvState?.paused ? ["Paused on the TV", "warn"] : tvState?.buffering ? ["TV is loading", "warn"] : ["In sync", "ok"];
 video.addEventListener("waiting", () => { clearTimeout(waitingTimer); waitingTimer = setTimeout(() => { if (video.readyState < 3 && !video.paused) ui.setTv("Buffering", ""); }, 600); });
 video.addEventListener("playing", () => { clearTimeout(waitingTimer); ui.setTv(...tvChip()); });

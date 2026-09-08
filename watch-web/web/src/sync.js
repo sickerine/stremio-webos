@@ -16,11 +16,14 @@ export const SNAP_BAND_PLAYING = 0.25;  // right after a TV seek while playing: 
 
 // paused: the TV sits on a frame; land on that frame instead of merely pausing too.
 // snap: the TV just seeked or toggled pause; land exactly rather than nudging the rate.
-export function syncAction(currentSeconds, targetSeconds, { paused = false, snap = false, playbackRate = 1 } = {}) {
+export function syncAction(currentSeconds, targetSeconds, { paused = false, snap = false, playbackRate = 1, rateCorrection = true } = {}) {
   const diff = targetSeconds - currentSeconds;
   const abs = Math.abs(diff);
   if (paused || snap) return abs <= (paused ? SNAP_BAND : SNAP_BAND_PLAYING) ? { type: "none", playbackRate } : { type: "seek", positionSeconds: targetSeconds };
   if (abs <= DEAD_BAND) return { type: "none", playbackRate };
+  // Safari can pause audio/video when playbackRate changes. Keep native managed
+  // playback steady between explicit TV events; still recover large drift.
+  if (abs < NUDGE_BAND && !rateCorrection) return { type: "none", playbackRate };
   if (abs < NUDGE_BAND) return { type: "rate", playbackRate: playbackRate * (diff > 0 ? 1 + NUDGE_RATE : 1 - NUDGE_RATE) };
   return { type: "seek", positionSeconds: targetSeconds };
 }
