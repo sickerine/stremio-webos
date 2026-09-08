@@ -37,6 +37,7 @@ async function opusEncodable() { if (opusOk == null) opusOk = await canEncodeAud
 export class Pipeline {
   constructor(video, { onTracks, onStatus, onError } = {}) {
     this.video = video;
+    this.MediaSource = globalThis.MediaSource || globalThis.ManagedMediaSource;
     this.onTracks = onTracks; this.onStatus = onStatus; this.onError = onError;
     this.source = null; this.input = null;
     this.mediaSource = null; this.sourceBuffer = null;
@@ -50,6 +51,7 @@ export class Pipeline {
   // ---- open a file: probe tracks, decide what's playable ----
   async open(cdnUrl, { tee, size } = {}) {
     await this.close();
+    if (!this.MediaSource) throw new Error("This browser does not support MediaSource or ManagedMediaSource streaming.");
     const source = new ByteSource(cdnUrl, { size });
     if (tee) source.setTee(tee);
     this.source = source;
@@ -62,7 +64,7 @@ export class Pipeline {
     const duration = (await video.getDurationFromMetadata()) ?? (await this.input.computeDuration());
 
     const vCodec = await video.getCodecParameterString();
-    const vOk = vCodec ? MediaSource.isTypeSupported(mime(vCodec)) : false;
+    const vOk = vCodec ? this.MediaSource.isTypeSupported(mime(vCodec)) : false;
     const opus = await opusEncodable();
     const audioInfos = [];
     for (const a of audios) {
@@ -71,7 +73,7 @@ export class Pipeline {
       // fMP4 parser fails on >2ch AAC/FLAC passthrough (CHUNK_DEMUXER_ERROR_APPEND_FAILED).
       // So only pass through <=2ch directly; downmix anything wider to stereo Opus, the
       // same path Dolby/DTS already use. `supported` implies WebCodecs can decode it too.
-      const supported = codecString ? MediaSource.isTypeSupported(mime(vCodec || "avc1.640028", codecString)) : false;
+      const supported = codecString ? this.MediaSource.isTypeSupported(mime(vCodec || "avc1.640028", codecString)) : false;
       const ch = a.numberOfChannels || 2;
       const direct = supported && ch <= 2;
       const transcode = !direct && opus && (TRANSCODABLE.has(a.codec) || supported);
@@ -104,10 +106,15 @@ export class Pipeline {
     const codecs = mime(this.tracks.video.codecString, audioMime);
 
     if (!this.mediaSource) {
-      this.mediaSource = new MediaSource();
+      // iPhone Safari exposes ManagedMediaSource instead of MediaSource. It needs
+      // remote playback disabled because this byte-fed player has no AirPlay URL.
+      if (this.MediaSource === globalThis.ManagedMediaSource) this.video.disableRemotePlayback = true;
+      this.mediaSource = new this.MediaSource();
       this.video.__pipeline = this;                                   // whoever attached last owns the element
+      const opened = new Promise(r => this.mediaSource.addEventListener("sourceopen", r, { once: true }));
       this.video.src = URL.createObjectURL(this.mediaSource);
-      await new Promise(r => this.mediaSource.addEventListener("sourceopen", r, { once: true }));
+      this.video.load();
+      await opened;
       this.mediaSource.duration = this.tracks.duration;
       this.sourceBuffer = this.mediaSource.addSourceBuffer(codecs);
       this.sourceBuffer.mode = "segments";
