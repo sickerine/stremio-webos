@@ -12,7 +12,7 @@ export const NUDGE_BAND = 3.0;   // gentle playbackRate correction up to this
 export const NUDGE_RATE = 0.06;  // +-6% rate
 
 export const SNAP_BAND = 0.08;      // landing on a frame while the TV is paused: be this exact
-export const SNAP_BAND_PLAYING = 0.25;  // right after a TV seek while playing: TV samples jitter as its clock re-locks, don't chase them
+export const SNAP_BAND_PLAYING = 0.08;  // align explicit playing actions to the presented frame
 
 // paused: the TV sits on a frame; land on that frame instead of merely pausing too.
 // snap: the TV just seeked or toggled pause; land exactly rather than nudging the rate.

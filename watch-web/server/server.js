@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { bestOffset } from "../shared/clock.js";
+import { bestOffset, INITIAL_CLOCK_SAMPLES, CLOCK_BURST_GAP_MS } from "../shared/clock.js";
 import { loginPage } from "./login.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
@@ -163,7 +163,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
       const t = Date.now(); probes.add(t);
       if (probes.size > 8) probes.delete(probes.values().next().value);
       send(socket, { type: "clock-ping", t });
-      clockTimer = setTimeout(probe, ++probeCount < 6 ? 250 : 10000);
+      clockTimer = setTimeout(probe, ++probeCount < INITIAL_CLOCK_SAMPLES ? CLOCK_BURST_GAP_MS : 10000);
       clockTimer.unref?.();
     };
     socket.on("close", () => { clearTimeout(clockTimer); room.clients.delete(socket); });
@@ -179,13 +179,14 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
         const now = Date.now();
         clockSamples.push({ rtt: now - msg.t, offset: (msg.t + now) / 2 - msg.tvMs });
         if (clockSamples.length > 8) clockSamples.shift();
+        if (clockSamples.length < INITIAL_CLOCK_SAMPLES) return;
         clockOffset = bestOffset(clockSamples);
         if (pending) { const saved = pending; pending = null; acceptEvent(saved.msg, saved.receivedAtMs); }
         return;
       }
       if (msg.type !== "state" && msg.type !== "idle") return;
       const receivedAtMs = Date.now();
-      // Keep the latest snapshot until the first clock exchange completes. Never
+      // Keep the latest snapshot until the initial clock-sampling burst completes. Never
       // substitute packet arrival time for the TV's capture time.
       if (clockOffset == null) { pending = { msg, receivedAtMs }; return; }
       acceptEvent(msg, receivedAtMs);

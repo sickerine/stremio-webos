@@ -1,8 +1,8 @@
 // WebSocket client for the relay. Emits: state(state), media(cdnUrl, sessionId), idle(), connection(status).
 // Also keeps an NTP-style estimate of (local clock - relay clock) so relay timestamps
 // on TV samples can be read in local time: toLocalMs(relayMs).
-import { bestOffset } from "../../shared/clock.js";
-const PING_BURST = 6, PING_BURST_GAP_MS = 250, PING_EVERY_MS = 10000, PING_KEEP = 8;
+import { bestOffset, INITIAL_CLOCK_SAMPLES, CLOCK_BURST_GAP_MS } from "../../shared/clock.js";
+const PING_EVERY_MS = 10000, PING_KEEP = 8;
 
 export function connectRelay({ room = "home", build = null, onState, onMedia, onIdle, onConnection, onResolveError }) {
   let socket = null, timer = null, closed = false;
@@ -12,7 +12,7 @@ export function connectRelay({ room = "home", build = null, onState, onMedia, on
   function startPings() {
     stopPings(); pending = []; latestState = null; pings = []; offset = null; rtt = null;
     let n = 0;
-    const burst = () => { ping(); if (++n < PING_BURST) pingTimer = setTimeout(burst, PING_BURST_GAP_MS); else pingTimer = setInterval(ping, PING_EVERY_MS); };
+    const burst = () => { ping(); if (++n < INITIAL_CLOCK_SAMPLES) pingTimer = setTimeout(burst, CLOCK_BURST_GAP_MS); else pingTimer = setInterval(ping, PING_EVERY_MS); };
     burst();
   }
   function stopPings() { clearTimeout(pingTimer); clearInterval(pingTimer); pingTimer = null; }
@@ -42,6 +42,7 @@ export function connectRelay({ room = "home", build = null, onState, onMedia, on
       if (m.type === "pong") {
         const now = Date.now(), r = now - m.t;
         pings.push({ rtt: r, offset: (m.t + now) / 2 - m.serverMs }); if (pings.length > PING_KEEP) pings.shift();
+        if (pings.length < INITIAL_CLOCK_SAMPLES) return;
         offset = bestOffset(pings); rtt = Math.min(...pings.map(p => p.rtt));
         const queued = pending; pending = []; queued.forEach(deliver);
         return;
@@ -56,9 +57,9 @@ export function connectRelay({ room = "home", build = null, onState, onMedia, on
   open();
   return {
     close() { closed = true; clearTimeout(timer); stopPings(); try { socket?.close(); } catch {} },
-    // relay timestamp -> local Date.now() ms; null until the first pong lands
+    // relay timestamp -> local Date.now() ms; null until the initial calibration completes
     send(obj) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj)); },
     toLocalMs: relayMs => (offset == null || !Number.isFinite(relayMs) ? null : relayMs + offset),
-    clock: () => ({ offsetMs: offset, rttMs: rtt }),
+    clock: () => ({ offsetMs: offset, rttMs: rtt, samples: pings.length, ready: offset != null }),
   };
 }
