@@ -5,21 +5,22 @@ import { SubtitleDemux, AssRenderer } from "./subtitles/ass.js";
 import { BitmapDemux } from "./subtitles/bitmap-demux.js";
 import { BitmapRenderer } from "./subtitles/bitmap.js";
 import { TextSubtitles } from "./subtitles/text.js";
-import { estimateTvPosition, syncAction, tvJumped, tvStalled, SNAP_WINDOW_MS } from "./sync.js";
+import { estimateTvPosition, syncAction } from "./sync.js";
 
 const room = new URLSearchParams(location.search).get("room") || "home";
 const ui = buildUi(document.getElementById("app"));
 const video = ui.el.video;
 video.muted = true;
 
-let tvState = null;              // last TV sample (+receivedAtMs)
+let tvState = null;              // last TV sample, in the viewer clock
+let pendingCorrection = null;
+const syncStats = { seeks: 0, remuxes: 0, waits: 0 };
 let session = null;              // { id, cdnUrl, pipeline, demux, ass, text, subTracks, selectedSub }
 let audioUnlocked = false;
 let seeking = false;
 let lastRemuxAt = 0;
 const REMUX_COOLDOWN_MS = 5000;   // min gap between cold re-muxes while catching up
 const FEED_WAIT_S = 20;           // if the running mux is within this much media of the target, wait for it instead of restarting
-const JUMP_HOLD_MS = 1000;        // act on a TV jump only once a second sample confirms it (the TV blips to 0 on reload)
 
 const prefs = { audio: localStorage.getItem("watch.audio") || "", subs: localStorage.getItem("watch.subs") || "eng" };
 
@@ -162,10 +163,11 @@ async function selectSub(number, user) {
 
 // ---- follow the TV ----
 async function follow() {
-  const s = session; if (!s || !tvState || seeking) return;
+  const s = session; if (!s || !tvState || s.id !== tvState.sessionId || seeking) return;
   if (!s.pipeline.sourceBuffer) return;
-  if (Date.now() < tvState.holdUntil) return;          // a jump just arrived; wait for the next sample to confirm it
   const target = estimateTvPosition(tvState);
+  const correction = pendingCorrection;
+  const playbackRate = tvState.playbackRate || 1;
   const hold = tvState.paused || tvState.buffering;          // TV sits on a frame: paused, or "playing" but not advancing
   // Let Safari decode its first frame before enforcing the TV's paused state.
   // Pausing during startup can put it back into metadata-only loading.
@@ -173,7 +175,7 @@ async function follow() {
   if (hold) { if (!video.paused && !s.pipeline.priming) video.pause(); }
   else if (video.paused && video.readyState >= 2) { video.play().catch(() => {}); }
 
-  const act = syncAction(video.currentTime, target, { paused: hold, snap: Date.now() < tvState.snapUntil });
+  const act = syncAction(video.currentTime, target, { paused: hold, snap: Boolean(correction), playbackRate });
   if (act.type === "seek") {
     // If the target is already buffered, jump instantly. Otherwise a hard seek means
     // re-muxing from there, which clears the buffer; don't do that again until the
@@ -183,20 +185,26 @@ async function follow() {
     const feedIsClose = run && !run.cancelled && run.fedTs != null && target >= run.startAt && target - run.fedTs < FEED_WAIT_S;
     if (s.pipeline.isBuffered(target)) {
       seeking = true;
-      try { await s.pipeline.seekTo(target); } finally { seeking = false; }
-      video.playbackRate = 1;
+      syncStats.seeks++;
+      try { await s.pipeline.seekTo(target); if (pendingCorrection === correction) pendingCorrection = null; } finally { seeking = false; }
+      video.playbackRate = playbackRate;
     } else if (feedIsClose) {
-      video.playbackRate = 1;                          // the running mux reaches the target in a moment; restarting would only add a cold start
+      video.playbackRate = playbackRate;                          // the running mux reaches the target in a moment; restarting would only add a cold start
     } else if (Date.now() - lastRemuxAt > REMUX_COOLDOWN_MS) {
       lastRemuxAt = Date.now();
       seeking = true;
-      try { await s.pipeline.start(Math.max(0, target - 2)); video.currentTime = target; } finally { seeking = false; }
-      video.playbackRate = 1;
+      try {
+        syncStats.remuxes++;
+        await s.pipeline.start(Math.max(0, target - 2));
+        if (session === s && tvState?.sessionId === s.id) video.currentTime = estimateTvPosition(tvState);
+        if (pendingCorrection === correction) pendingCorrection = null;
+      } finally { seeking = false; }
+      video.playbackRate = playbackRate;
     } else {
       // waiting for the in-flight re-mux to reach the target; nudge toward it
-      video.playbackRate = 1;
+      video.playbackRate = playbackRate;
     }
-  } else video.playbackRate = act.playbackRate;
+  } else { video.playbackRate = act.playbackRate; if (pendingCorrection === correction) pendingCorrection = null; }
 
   if (video.readyState >= (hold ? 2 : 3) && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) { ui.setStage("done"); ui.overlay(false); }
   else if (video.readyState < 3 && s.pipeline.isBuffered(target) === false && ui.el.overlay.hidden) { /* stalled; leave player visible */ }
@@ -210,6 +218,7 @@ setInterval(() => {
   const recent = src.log.filter(e => e.t > netlogSent); netlogSent = Date.now();
   const p = session.pipeline, a = p.tracks?.audios.find(x => x.id === p.selectedAudioId);
   relay.send({ type: "netlog", data: { host: (() => { try { return new URL(src.url).host; } catch { return "?"; } })(), requests: src.requests, retries: src.retries, MB: +(src.bytesFetched / 1048576).toFixed(0),
+    sync: { ...syncStats, sampleAgeMs: tvState ? Math.round(Date.now() - tvState.sampledAtMs) : null, event: tvState?.event, clock: relay.clock() },
     cachedChunks: src.order.length, cacheLimitMB: src.maxCachedChunks * src.chunkSize / 1048576,
     t: video.currentTime.toFixed(1), tv: tvState && +estimateTvPosition(tvState).toFixed(1), paused: video.paused, rs: video.readyState, buffered: p.buffered().map(r => r.map(x => +x.toFixed(0))),
     video: p.tracks && `${p.tracks.video.codec} ${p.tracks.video.width}x${p.tracks.video.height}`, audio: a && `${a.codec} ${a.channels}ch ${a.transcode ? "transcode" : "direct"}`, audios: p.tracks?.audios.map(x => `${x.codec}:${x.playable ? "ok" : "no"}`),
@@ -223,6 +232,7 @@ setInterval(() => {
 for (const ev of ["seeked", "pause", "timeupdate"]) video.addEventListener(ev, () => { if (video.paused) session?.ass.renderNow(); });
 // Status chip: "Buffering" only if a stall outlasts a seek's blip, so landings don't flash it.
 let waitingTimer = null;
+video.addEventListener("waiting", () => { syncStats.waits++; });
 const tvChip = () => tvState?.paused ? ["Paused on the TV", "warn"] : tvState?.buffering ? ["TV is loading", "warn"] : ["In sync", "ok"];
 video.addEventListener("waiting", () => { clearTimeout(waitingTimer); waitingTimer = setTimeout(() => { if (video.readyState < 3 && !video.paused) ui.setTv("Buffering", ""); }, 600); });
 video.addEventListener("playing", () => { clearTimeout(waitingTimer); ui.setTv(...tvChip()); });
@@ -248,14 +258,16 @@ const relay = connectRelay({
   onConnection: st => ui.setConnection(st),
   onState: (state, resolveError, resolveHost) => {
     const now = Date.now();
-    // The relay stamps each sample on arrival (sentAtMs, relay clock). With the clock
-    // synced, read that in local time so transit latency drops out of the estimate.
-    const sampledAt = relay.toLocalMs(state.sentAtMs) ?? now;
-    const jumped = tvJumped(tvState, state, now);
-    const snapUntil = jumped ? now + SNAP_WINDOW_MS : (tvState?.snapUntil || 0);
-    const holdUntil = jumped ? now + JUMP_HOLD_MS : (tvState?.holdUntil || 0);
-    const buffering = tvStalled(tvState, state, now);
-    tvState = { ...state, buffering, receivedAtMs: sampledAt, snapUntil, holdUntil };
+    const sampledAtMs = relay.toLocalMs(state.sampledAtMs);
+    if (sampledAtMs == null) return;
+    // Discrete timeline changes get one correction. Heartbeats only nudge rate;
+    // a noisy clock sample must not trigger a multi-second sequence of seeks.
+    if (!tvState || tvState.sessionId !== state.sessionId ||
+        ["play", "seeked", "ratechange"].includes(state.event)) pendingCorrection = { sessionId: state.sessionId, sequence: state.sequence };
+    const buffering = state.buffering;
+    tvState = { ...state, sampledAtMs, arrivedAtMs: now };
+    if ((state.paused || buffering) && session && !session.pipeline.priming) video.pause();
+    if (session?.id === state.sessionId) void follow();
     ui.setTitle(titleFor(state));
     ui.setTv(state.paused ? "Paused on the TV" : buffering ? "TV is loading" : "In sync", state.paused || buffering ? "warn" : "ok");
     if (!session) {
@@ -268,7 +280,7 @@ const relay = connectRelay({
     if (resolveError) console.warn("resolve failed, using original url:", resolveError);
     if (!session || session.id !== sessionId) void queueStart(sessionId, cdnUrl, size);
   },
-  onIdle: () => { void queueEnd(); tvState = null; showIdle(); },
+  onIdle: () => { video.pause(); void queueEnd(); tvState = null; pendingCorrection = null; showIdle(); },
   onResolveError: (message, attempt, host) => {
     if (session) return;
     ui.setStage("resolve");
@@ -282,6 +294,7 @@ showIdle();
 window.__watch = () => {
   const s = session; const p = s?.pipeline;
   return {
+    sync: { ...syncStats, event: tvState?.event, sampledAtMs: tvState?.sampledAtMs, clock: relay.clock() },
     tv: tvState && { pos: tvState.positionSeconds, paused: tvState.paused, est: estimateTvPosition(tvState) },
     clock: relay.clock(),
     video: { t: video.currentTime, paused: video.paused, rs: video.readyState, rate: video.playbackRate, muted: video.muted, w: video.videoWidth, h: video.videoHeight, error: video.error && `${video.error.code} ${video.error.message}` },

@@ -7,17 +7,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { bestOffset } from "../shared/clock.js";
 import { loginPage } from "./login.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".wasm": "application/wasm", ".woff2": "font/woff2", ".json": "application/json", ".svg": "image/svg+xml", ".map": "application/json" };
 
-export function normalizeState(c) {
+export function normalizeState(c, clockOffsetMs = 0, receivedAtMs = Date.now()) {
   if (!c || typeof c !== "object") return null;
   if (typeof c.sessionId !== "string" || !c.sessionId) return null;
   if (!Number.isSafeInteger(c.sequence) || c.sequence < 0) return null;
   if (!Number.isFinite(c.positionSeconds) || c.positionSeconds < 0) return null;
+  if (!Number.isFinite(c.sampledAtMs)) return null;
   const mediaUrl = typeof c.mediaUrl === "string" && /^https?:\/\//i.test(c.mediaUrl) ? c.mediaUrl : null;
   return {
     sessionId: c.sessionId, sequence: c.sequence, positionSeconds: c.positionSeconds,
@@ -27,7 +29,8 @@ export function normalizeState(c) {
     mediaUrl,
     title: typeof c.title === "string" ? c.title.slice(0, 300) : "",
     episodeId: typeof c.episodeId === "string" ? c.episodeId.slice(0, 100) : "",
-    sentAtMs: Date.now(),
+    event: typeof c.event === "string" ? c.event : "heartbeat",
+    sampledAtMs: c.sampledAtMs + clockOffsetMs, tvSampledAtMs: c.sampledAtMs, receivedAtMs,
   };
 }
 
@@ -82,13 +85,13 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
   // `hello`, so a tab left open across a deploy reloads instead of running old code.
   let build = null;
   try { build = /\/assets\/index-[\w-]+\.js/.exec(readFileSync(path.join(distRoot, "index.html"), "utf8"))?.[0] ?? null; } catch {}
-  const goIdle = room => { room.state = null; room.cdnUrl = null; room.size = null; room.resolving = null; room.resolveError = null; broadcast(room, { type: "room-idle" }); };
+  const goIdle = (room, event = { sampledAtMs: Date.now(), event: "disconnected" }) => { room.state = null; room.cdnUrl = null; room.size = null; room.resolving = null; room.resolveError = null; broadcast(room, { type: "room-idle", ...event }); };
 
   // The TV heartbeats every 500ms while it has media. If a room's last sample is
   // older than staleMs the TV is gone (relaunched, crashed, unplugged): its own idle
   // message never comes, because a fresh app instance knows nothing of the old session.
   const sweeper = setInterval(() => {
-    for (const [id, room] of rooms) if (room.state && Date.now() - room.state.sentAtMs > staleMs) { console.log(`[relay] ${id}: no TV heartbeat for ${staleMs}ms, idle`); goIdle(room); }
+    for (const [id, room] of rooms) if (room.state && Date.now() - room.state.receivedAtMs > staleMs) { console.log(`[relay] ${id}: no TV heartbeat for ${staleMs}ms, idle`); goIdle(room); }
   }, Math.max(20, staleMs / 3));
   sweeper.unref?.();
 
@@ -115,7 +118,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
       for (const [id, r] of rooms) {
         let tv = 0, viewers = 0; for (const c of r.clients) c.watchRole === "tv" ? tv++ : viewers++;
         out[id] = { tv, viewers, cdnUrl: r.cdnUrl ? r.cdnUrl.replace(/token=[^&]+/, "token=REDACTED") : null, resolveError: r.resolveError, mediaHost: r.state?.mediaUrl ? new URL(r.state.mediaUrl).host : null, state: r.state && { ...r.state, mediaUrl: undefined },
-          ...(url.searchParams.has("samples") ? { samples: r.samples || [] } : {}) };   // raw TV samples: [sentAtMs, position, paused, sequence]
+          ...(url.searchParams.has("samples") ? { samples: r.samples || [] } : {}) };   // raw TV samples: [sampledAtMs, position, paused, sequence]
       }
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: true, rooms: out })); return;
     }
@@ -154,7 +157,16 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
     socket.watchRole = role;
     room.clients.add(socket);
     send(socket, { type: "hello", role, room: roomId, build, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
-    socket.on("close", () => room.clients.delete(socket));
+    let clockOffset = null, clockTimer = null, probeCount = 0, pending = null;
+    const clockSamples = [], probes = new Set();
+    const probe = () => {
+      const t = Date.now(); probes.add(t);
+      if (probes.size > 8) probes.delete(probes.values().next().value);
+      send(socket, { type: "clock-ping", t });
+      clockTimer = setTimeout(probe, ++probeCount < 6 ? 250 : 10000);
+      clockTimer.unref?.();
+    };
+    socket.on("close", () => { clearTimeout(clockTimer); room.clients.delete(socket); });
     socket.on("message", async data => {
       let msg; try { msg = JSON.parse(data.toString()); } catch { return send(socket, { type: "error", code: "invalid-json" }); }
       if (msg.type === "ping") return send(socket, { type: "pong", t: msg.t, serverMs: Date.now() });
@@ -163,23 +175,46 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
       if (msg.type === "netlog") { console.log(`[netlog] ${roomId} ${JSON.stringify(msg.data).slice(0, 4000)}`); return; }
       if (role !== "tv") return send(socket, { type: "error", code: "viewer-read-only" });
 
+      if (msg.type === "clock-pong" && probes.delete(msg.t) && Number.isFinite(msg.tvMs)) {
+        const now = Date.now();
+        clockSamples.push({ rtt: now - msg.t, offset: (msg.t + now) / 2 - msg.tvMs });
+        if (clockSamples.length > 8) clockSamples.shift();
+        clockOffset = bestOffset(clockSamples);
+        if (pending) { const saved = pending; pending = null; acceptEvent(saved.msg, saved.receivedAtMs); }
+        return;
+      }
+      if (msg.type !== "state" && msg.type !== "idle") return;
+      const receivedAtMs = Date.now();
+      // Keep the latest snapshot until the first clock exchange completes. Never
+      // substitute packet arrival time for the TV's capture time.
+      if (clockOffset == null) { pending = { msg, receivedAtMs }; return; }
+      acceptEvent(msg, receivedAtMs);
+    });
+    if (role === "tv") probe();
+
+    function acceptEvent(msg, receivedAtMs) {
       if (msg.type === "idle") {
-        if (!msg.sessionId || !room.state || room.state.sessionId === msg.sessionId) goIdle(room);
+        if (Number.isFinite(msg.sampledAtMs) && room.state?.sessionId === msg.sessionId &&
+            Number.isSafeInteger(msg.sequence) && msg.sequence > room.state.sequence) {
+          room.lastEvent = { sessionId: msg.sessionId, sequence: msg.sequence };
+          goIdle(room, { sessionId: msg.sessionId, sequence: msg.sequence, event: "idle", sampledAtMs: msg.sampledAtMs + clockOffset, receivedAtMs });
+        }
         return;
       }
       if (msg.type !== "state") return;
-      const next = normalizeState(msg.state);
+      const next = normalizeState(msg.state, clockOffset, receivedAtMs);
       if (!next) return send(socket, { type: "error", code: "invalid-state" });
       const prev = room.state;
-      if (prev && prev.sessionId === next.sessionId && prev.sequence >= next.sequence) return;
+      if (room.lastEvent?.sessionId === next.sessionId && room.lastEvent.sequence >= next.sequence) return;
+      room.lastEvent = { sessionId: next.sessionId, sequence: next.sequence };
       const newSession = !prev || prev.sessionId !== next.sessionId || prev.mediaUrl !== next.mediaUrl;
       room.state = next;
-      (room.samples ||= []).push([next.sentAtMs, next.positionSeconds, next.paused ? 1 : 0, next.sequence]); if (room.samples.length > 120) room.samples.shift();
+      (room.samples ||= []).push([next.sampledAtMs, next.positionSeconds, next.paused ? 1 : 0, next.sequence]); if (room.samples.length > 120) room.samples.shift();
       if (newSession) { room.cdnUrl = null; room.size = null; room.resolveError = null; broadcast(room, { type: "room-state", state: next, cdnUrl: null }); }
       else broadcast(room, { type: "room-state", state: next, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
 
       if (newSession && next.mediaUrl) startResolve(room, next);
-    });
+    }
   });
 
   // Resolve with retries: TorBox/torrentio hiccup for a minute fairly often, and the

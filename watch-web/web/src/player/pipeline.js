@@ -50,6 +50,7 @@ export class Pipeline {
     this.onTracks = onTracks; this.onStatus = onStatus; this.onError = onError;
     this.source = null; this.input = null;
     this.mediaSource = null; this.sourceBuffer = null;
+    this.generation = 0;
     this.run = null;               // current feed run {cancelled, output}
     this.tracks = null;
     this.selectedAudioId = null;
@@ -131,7 +132,10 @@ export class Pipeline {
   async start(startAt, audioId = this.selectedAudioId ?? this.pickDefaultAudio()) {
     this.startCount = (this.startCount || 0) + 1;
     if (!this.tracks) throw new Error("open() first");
+    const generation = ++this.generation;
+    const active = () => generation === this.generation;
     await this._cancelRun();
+    if (!active()) return;
     this.selectedAudioId = audioId;
     const audio = this.tracks.audios.find(a => a.id === audioId) || null;
     const audioMime = audio?.outputCodecString ?? null;
@@ -143,7 +147,12 @@ export class Pipeline {
       if (this.MediaSource === globalThis.ManagedMediaSource) this.video.disableRemotePlayback = true;
       this.mediaSource = new this.MediaSource();
       this.video.__pipeline = this;                                   // whoever attached last owns the element
-      const opened = new Promise(r => this.mediaSource.addEventListener("sourceopen", r, { once: true }));
+      const mediaSource = this.mediaSource;
+      const opened = new Promise(resolve => {
+        const done = () => { mediaSource.removeEventListener("sourceopen", done); resolve(); };
+        this.cancelOpening = done;
+        mediaSource.addEventListener("sourceopen", done, { once: true });
+      });
       this.sourceUrl = URL.createObjectURL(this.mediaSource);
       this.video.src = this.sourceUrl;
       this.video.load();
@@ -152,13 +161,17 @@ export class Pipeline {
         this.requestPlayback();
       }
       await opened;
+      if (!active()) return;
+      this.cancelOpening = null;
       this.mediaSource.duration = this.tracks.duration;
       this.sourceBuffer = this.mediaSource.addSourceBuffer(codecs);
       this.sourceBuffer.mode = "segments";
     } else {
       await this._whenIdle();
+      if (!active()) return;
       try { this.sourceBuffer.abort(); } catch {}
       if ((this._ranges() || []).length) await this._remove(0, this.mediaSource.duration || 1e9);
+      if (!active()) return;
       try { this.sourceBuffer.changeType(codecs); } catch {}
     }
     this.currentMime = codecs;
@@ -179,7 +192,8 @@ export class Pipeline {
         : new EncodedAudioPacketSource(audio.codec);
       output.addAudioTrack(aSrc);
     }
-    await output.start();
+    try { await output.start(); } catch (error) { if (active()) throw error; return; }
+    if (!active()) return;
 
     this.onStatus?.({ phase: "muxing", startAt });
     void this._feed(run, vSrc, aSrc, audio, startAt).catch(e => { if (!run.cancelled) this.onError?.(e); });
@@ -308,6 +322,8 @@ export class Pipeline {
   }
 
   async close() {
+    this.generation++;
+    this.cancelOpening?.(); this.cancelOpening = null;
     await this._cancelRun();
     if (this.mediaSource) { try { if (this.mediaSource.readyState === "open") this.mediaSource.endOfStream(); } catch {} }
     this.mediaSource = null; this.sourceBuffer = null;

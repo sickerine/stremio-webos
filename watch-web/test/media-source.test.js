@@ -97,3 +97,19 @@ test("Opus remains preferred when both encoding and MP4 playback support it", as
 test("an audio encoder is unusable unless both playback and encoding are supported", async () => {
   assert.equal(await selectAudioEncoder({ isTypeSupported: () => true }, "avc1.640028", async () => false), null);
 });
+
+
+test("stop supersedes a pending seek without reviving a closed pipeline", async t => {
+  const { pipeline } = environment(t, true);
+  await pipeline.start(0);
+  let release;
+  pipeline._whenIdle = () => new Promise(resolve => { release = resolve; });
+  const seek = pipeline.start(20);
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  await pipeline.close();
+  release();
+  await seek;
+  assert.equal(pipeline.mediaSource, null);
+  assert.equal(pipeline.run, null);
+  assert.equal(pipeline.tracks, null);
+});
