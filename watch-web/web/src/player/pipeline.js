@@ -11,6 +11,7 @@ import {
 import { downmixToStereo } from "./downmix.js";
 import { registerAc3Decoder } from "@mediabunny/ac3";
 import { registerDtsDecoder } from "@mediabunny/dts";
+import { presentedFrame, seekLead } from "./presentation.js";
 import { ByteSource } from "../net/byte-source.js";
 
 registerAc3Decoder();   // AC-3 + E-AC-3
@@ -51,6 +52,8 @@ export class Pipeline {
     this.source = null; this.input = null;
     this.mediaSource = null; this.sourceBuffer = null;
     this.generation = 0;
+    this.presentationAbort = new AbortController();
+    this.seekSamples = [];
     this.run = null;               // current feed run {cancelled, output}
     this.tracks = null;
     this.selectedAudioId = null;
@@ -83,6 +86,7 @@ export class Pipeline {
   // ---- open a file: probe tracks, decide what's playable ----
   async open(cdnUrl, { tee, size } = {}) {
     await this.close();
+    this.presentationAbort = new AbortController();
     if (!this.MediaSource) throw new Error("This browser does not support MediaSource or ManagedMediaSource streaming.");
     const source = new ByteSource(cdnUrl, { size, ...this.bufferPolicy });
     if (tee) source.setTee(tee);
@@ -309,10 +313,18 @@ export class Pipeline {
   isBuffered(t, slack = 0.25) { for (const [s, e] of this.buffered()) if (t >= s - slack && t <= e - slack) return true; return false; }
 
   // TV jumped: play from the buffer if we have it, otherwise re-mux from there.
+  get seekLatencyMs() { return seekLead(this.seekSamples); }
+  async present(action, target = null) {
+    return presentedFrame(this.video, action, { target, signal: this.presentationAbort.signal });
+  }
   async seekTo(t) {
-    if (this.isBuffered(t)) { this.video.currentTime = t; return; }
-    await this.start(Math.max(0, t), this.selectedAudioId);
-    this.video.currentTime = t;
+    const warm = this.isBuffered(t);
+    const advancing = !this.video.paused;
+    if (!warm) await this.start(Math.max(0, t), this.selectedAudioId);
+    if (this.presentationAbort.signal.aborted) return;
+    const frame = await this.present(() => { this.video.currentTime = t; }, t);
+    if (warm && advancing && frame) { this.seekSamples.push(frame.latencyMs); if (this.seekSamples.length > 5) this.seekSamples.shift(); }
+    return frame;
   }
   async selectAudio(audioId) {
     if (audioId === this.selectedAudioId) return;
@@ -322,6 +334,7 @@ export class Pipeline {
   }
 
   async close() {
+    this.presentationAbort.abort();
     this.generation++;
     this.cancelOpening?.(); this.cancelOpening = null;
     await this._cancelRun();

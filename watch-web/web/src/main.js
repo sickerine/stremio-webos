@@ -69,8 +69,13 @@ function showIdle() {
 // been removed from the parent media source" on a perfectly good stream.
 let transition = Promise.resolve();
 function queued(fn) { const run = () => fn().catch(e => console.error(e)); transition = transition.then(run, run); return transition; }
-const queueEnd = () => queued(endSession);
-const queueStart = (id, cdnUrl, size) => queued(() => startSession(id, cdnUrl, size));
+let requestedStart = null;
+const queueEnd = () => { requestedStart = null; return queued(endSession); };
+const queueStart = (id, cdnUrl, size) => {
+  if (requestedStart === id || session?.id === id) return transition;
+  requestedStart = id;
+  return queued(() => requestedStart === id ? startSession(id, cdnUrl, size) : Promise.resolve());
+};
 
 async function endSession() {
   const s = session; session = null;
@@ -85,7 +90,7 @@ async function startSession(sessionId, cdnUrl, size) {
   if (session) return;                       // a later transition already took over
   ui.setStage("open");
   ui.overlay(true, tvState?.title || "Opening the stream", "Preparing it for your browser.");
-  const s = { id: sessionId, cdnUrl, size, subTracks: [], textTracks: [], bitmapTracks: [], selectedSub: null, fonts: 0 };
+  const s = { id: sessionId, cdnUrl, size, starting: true, subTracks: [], textTracks: [], bitmapTracks: [], selectedSub: null, fonts: 0 };
   s.ass = new AssRenderer(video, ui.el.assLayer);
   s.text = new TextSubtitles(video);
   s.bitmap = new BitmapRenderer(video, ui.el.assLayer);
@@ -120,7 +125,12 @@ async function startSession(sessionId, cdnUrl, size) {
     await s.pipeline.start(startAt, preferred ?? undefined);
     if (session !== s) return;
     renderAudioMenu();               // now that the default audio track is chosen
-    video.currentTime = startAt;
+    await s.pipeline.present(() => {
+      video.currentTime = estimateTvPosition(tvState) ?? startAt;
+      if (tvState && !tvState.paused && !tvState.buffering) return video.play();
+    });
+    s.starting = false;
+    if (session === s) void follow();
   } catch (e) {
     console.error(e);
     if (session === s) { ui.setStage(null); ui.overlay(true, "Can't play this stream", e.message); }
@@ -164,9 +174,9 @@ async function selectSub(number, user) {
 // ---- follow the TV ----
 function setPlaybackRate(rate) { if (video.playbackRate !== rate) video.playbackRate = rate; }
 async function follow() {
-  const s = session; if (!s || !tvState || s.id !== tvState.sessionId || seeking) return;
+  const s = session; if (!s || s.starting || !tvState || s.id !== tvState.sessionId || seeking) return;
   if (!s.pipeline.sourceBuffer) return;
-  const target = estimateTvPosition(tvState);
+  let target = estimateTvPosition(tvState);
   const correction = pendingCorrection;
   const playbackRate = tvState.playbackRate || 1;
   const hold = tvState.paused || tvState.buffering;          // TV sits on a frame: paused, or "playing" but not advancing
@@ -174,7 +184,13 @@ async function follow() {
   // Pausing during startup can put it back into metadata-only loading.
   if (video.readyState >= 2) s.pipeline.priming = false;
   if (hold) { if (!video.paused && !s.pipeline.priming) video.pause(); }
-  else if (video.paused && video.readyState >= 2) { video.play().catch(() => {}); }
+  else if (video.paused && video.readyState >= 2) {
+    seeking = true;
+    try { await s.pipeline.present(() => video.play()); } catch { return; } finally { seeking = false; }
+    if (session !== s || !tvState || tvState.sessionId !== s.id || tvState.paused || tvState.buffering) return;
+    target = estimateTvPosition(tvState);
+  }
+  if (video.readyState < 2) return;
 
   const act = syncAction(video.currentTime, target, { paused: hold, snap: Boolean(correction), playbackRate,
     rateCorrection: s.pipeline.MediaSource !== globalThis.ManagedMediaSource });
@@ -188,7 +204,19 @@ async function follow() {
     if (s.pipeline.isBuffered(target)) {
       seeking = true;
       syncStats.seeks++;
-      try { await s.pipeline.seekTo(target); if (pendingCorrection === correction) pendingCorrection = null; } finally { seeking = false; }
+      try {
+        const landing = () => estimateTvPosition(tvState, Date.now() + s.pipeline.seekLatencyMs);
+        await s.pipeline.seekTo(landing());
+        // At most one completion correction per event. Never turn this into a
+        // steady-playback seek loop. An intervening TV event supersedes this one.
+        if (session === s && pendingCorrection === correction && tvState?.sessionId === s.id &&
+            !tvState.paused && !tvState.buffering &&
+            Math.abs(video.currentTime - estimateTvPosition(tvState)) > 0.12 && s.pipeline.isBuffered(landing())) {
+          syncStats.seeks++;
+          await s.pipeline.seekTo(landing());
+        }
+        if (pendingCorrection === correction) pendingCorrection = null;
+      } finally { seeking = false; }
       setPlaybackRate(playbackRate);
     } else if (feedIsClose) {
       setPlaybackRate(playbackRate);                          // the running mux reaches the target in a moment; restarting would only add a cold start
@@ -198,8 +226,10 @@ async function follow() {
       try {
         syncStats.remuxes++;
         await s.pipeline.start(Math.max(0, target - 2));
-        if (session === s && tvState?.sessionId === s.id) video.currentTime = estimateTvPosition(tvState);
-        if (pendingCorrection === correction) pendingCorrection = null;
+        if (session === s && tvState?.sessionId === s.id) {
+          await s.pipeline.present(() => { video.currentTime = estimateTvPosition(tvState); });
+          if (!pendingCorrection) pendingCorrection = { sessionId: s.id, sequence: tvState.sequence };
+        }
       } finally { seeking = false; }
       setPlaybackRate(playbackRate);
     } else {
@@ -220,7 +250,7 @@ setInterval(() => {
   const recent = src.log.filter(e => e.t > netlogSent); netlogSent = Date.now();
   const p = session.pipeline, a = p.tracks?.audios.find(x => x.id === p.selectedAudioId);
   relay.send({ type: "netlog", data: { host: (() => { try { return new URL(src.url).host; } catch { return "?"; } })(), requests: src.requests, retries: src.retries, MB: +(src.bytesFetched / 1048576).toFixed(0),
-    sync: { ...syncStats, sampleAgeMs: tvState ? Math.round(Date.now() - tvState.sampledAtMs) : null, event: tvState?.event, clock: relay.clock() },
+    sync: { ...syncStats, seekLatencyMs: p.seekLatencyMs, sampleAgeMs: tvState ? Math.round(Date.now() - tvState.sampledAtMs) : null, event: tvState?.event, clock: relay.clock() },
     cachedChunks: src.order.length, cacheLimitMB: src.maxCachedChunks * src.chunkSize / 1048576,
     t: video.currentTime.toFixed(1), tv: tvState && +estimateTvPosition(tvState).toFixed(1), paused: video.paused, rs: video.readyState, buffered: p.buffered().map(r => r.map(x => +x.toFixed(0))),
     video: p.tracks && `${p.tracks.video.codec} ${p.tracks.video.width}x${p.tracks.video.height}`, audio: a && `${a.codec} ${a.channels}ch ${a.transcode ? "transcode" : "direct"}`, audios: p.tracks?.audios.map(x => `${x.codec}:${x.playable ? "ok" : "no"}`),
@@ -297,7 +327,7 @@ showIdle();
 window.__watch = () => {
   const s = session; const p = s?.pipeline;
   return {
-    sync: { ...syncStats, event: tvState?.event, sampledAtMs: tvState?.sampledAtMs, clock: relay.clock() },
+    sync: { ...syncStats, seekLatencyMs: session?.pipeline.seekLatencyMs, event: tvState?.event, sampledAtMs: tvState?.sampledAtMs, clock: relay.clock() },
     tv: tvState && { pos: tvState.positionSeconds, paused: tvState.paused, est: estimateTvPosition(tvState) },
     clock: relay.clock(),
     video: { t: video.currentTime, paused: video.paused, rs: video.readyState, rate: video.playbackRate, muted: video.muted, w: video.videoWidth, h: video.videoHeight, error: video.error && `${video.error.code} ${video.error.message}` },

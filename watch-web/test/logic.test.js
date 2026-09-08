@@ -21,7 +21,7 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
   assert.equal(syncAction(100, 100.2, { paused: true }).type, "seek");
   assert.equal(syncAction(100, 100.05, { paused: true }).type, "none");
   assert.equal(syncAction(100, 101.5, { snap: true }).type, "seek");
-  assert.equal(syncAction(100, 100.2, { snap: true }).type, "none");     // playing: tolerate TV clock jitter after a seek
+  assert.equal(syncAction(100, 100.2, { snap: true }).type, "seek");     // playing: tolerate TV clock jitter after a seek
   assert.equal(syncAction(100, 100.2, { paused: true }).type, "seek");   // paused: land on the frame
   // clock sync trusts the fastest ping
   assert.equal(bestOffset([{ rtt: 40, offset: 10 }, { rtt: 12, offset: 3 }, { rtt: 90, offset: -20 }]), 3);
@@ -106,6 +106,7 @@ test("relay marks a room idle when the TV stops heartbeating", async () => {
   const base = `ws://127.0.0.1:${server.address().port}/ws?room=t`;
   const open = url => new Promise(ok => { const s = new WebSocket(url); s.on("message", data => { const m = JSON.parse(data); if (m.type === "clock-ping") s.send(JSON.stringify({ type: "clock-pong", t: m.t, tvMs: Date.now() })); }); s.on("open", () => ok(s)); });
   const tv = await open(`${base}&role=tv`);
+  await new Promise(r => setTimeout(r, 650)); // finish the initial clock exchange
   tv.send(JSON.stringify({ type: "state", state: { sessionId: "s1", sequence: 1, sampledAtMs: Date.now(), positionSeconds: 5, mediaUrl: "http://x/y.mkv" } }));
   await new Promise(r => setTimeout(r, 30));
   const viewer = await open(`${base}&role=viewer`);

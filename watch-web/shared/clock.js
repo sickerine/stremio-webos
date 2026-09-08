@@ -1,3 +1,5 @@
+export const INITIAL_CLOCK_SAMPLES = 6;
+export const CLOCK_BURST_GAP_MS = 100;
 // Clock sync: each ping yields { rtt, offset } where offset = localMs - remoteMs.
 // Trust the one that travelled fastest; queueing only ever inflates the others.
 export function bestOffset(samples) {
