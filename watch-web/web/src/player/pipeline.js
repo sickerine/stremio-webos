@@ -19,7 +19,7 @@ registerDtsDecoder();   // DTS (incl. DTS-HD core)
 const DESKTOP_BUFFER = { aheadSeconds: 90, aheadBytes: 120 * 1024 * 1024, behindSeconds: 45 };
 // Leave memory for 4K decoding on phones; the raw file cache and MSE buffer
 // coexist. Cap response size too, independently of fetch reader backpressure.
-const MANAGED_BUFFER = { aheadSeconds: 15, aheadBytes: 24 * 1024 * 1024, behindSeconds: 5,
+const MANAGED_BUFFER = { ...DESKTOP_BUFFER, aheadSeconds: 15, aheadBytes: 24 * 1024 * 1024,
   maxCachedChunks: 4, prefetchAhead: 1, rangeBytes: 32 * 1024 * 1024 };
 const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
 const AUDIO_BITRATE = 256_000;
