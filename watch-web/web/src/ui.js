@@ -130,7 +130,10 @@ export function buildUi(root) {
     setTitle(text) { el.title.textContent = text || ""; },
     setStats(text) { el.stats.hidden = !text; el.stats.innerHTML = text ? `${ICONS.film}${text}` : ""; },
     overlay(visible, title, body) { el.overlay.hidden = !visible; if (title != null) el.ovTitle.textContent = title; if (body != null) el.ovBody.textContent = body; },
-    showSoundPrompt(show) { el.sound.hidden = !show; },
+    showSoundPrompt(show, loadVideo = false) {
+      el.sound.hidden = !show;
+      if (show) el.sound.innerHTML = loadVideo ? `${ICONS.play}Load video` : `${ICONS.sound}Turn sound on`;
+    },
     onSound(fn) { el.sound.addEventListener("click", fn); },
     audioMenu(items, selectedId, onPick) { renderMenu(el.audioMenu, "Audio", items, selectedId, onPick); el.audioBtn.toggleAttribute("disabled", items.length < 2); },
     subsMenu(items, selectedId, onPick) { renderMenu(el.subsMenu, "Subtitles", items, selectedId, onPick, { allowOff: true }); },

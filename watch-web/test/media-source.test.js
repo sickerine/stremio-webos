@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Pipeline, selectAudioEncoder } from "../web/src/player/pipeline.js";
 
-function environment(t, managedOnly) {
+function environment(t, managedOnly, requiresPlay = false) {
   const saved = ["MediaSource", "ManagedMediaSource"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]);
   t.after(() => { for (const [key, descriptor] of saved) descriptor ? Object.defineProperty(globalThis, key, descriptor) : delete globalThis[key]; });
   let source;
@@ -20,9 +20,14 @@ function environment(t, managedOnly) {
     set src(value) {
       this.attached = value;
       if (managedOnly) assert.equal(this.disableRemotePlayback, true, "Safari must be configured before attaching the source");
-      queueMicrotask(() => { source.readyState = "open"; source.dispatchEvent(new Event("sourceopen")); });
+      if (!requiresPlay) queueMicrotask(() => { source.readyState = "open"; source.dispatchEvent(new Event("sourceopen")); });
     },
     load() {},
+    play() {
+      this.playCalls = (this.playCalls || 0) + 1;
+      if (requiresPlay) queueMicrotask(() => { source.readyState = "open"; source.dispatchEvent(new Event("sourceopen")); });
+      return Promise.resolve();
+    },
   };
   const pipeline = new Pipeline(video);
   pipeline.tracks = { video: { codec: "avc", codecString: "avc1.640028" }, audios: [], duration: 60 };
@@ -45,6 +50,29 @@ test("the existing MediaSource path keeps remote playback unchanged", async t =>
   assert.ok(pipeline.mediaSource instanceof Source);
   assert.ok(!(pipeline.mediaSource instanceof ManagedSource));
   assert.equal(video.disableRemotePlayback, false);
+  await pipeline._cancelRun();
+});
+
+test("managed startup requests playback before waiting for sourceopen", { timeout: 500 }, async t => {
+  const { pipeline, video } = environment(t, true, true);
+  await pipeline.start(1200);
+  assert.equal(video.playCalls, 1);
+  assert.equal(pipeline.run.startAt, 1200);
+  await pipeline._cancelRun();
+});
+
+test("a rejected startup offers a gesture retry instead of hanging invisibly", async t => {
+  const { pipeline, video } = environment(t, true);
+  const phases = [];
+  pipeline.onStatus = status => phases.push(status.phase);
+  video.play = () => Promise.reject(new DOMException("User gesture required", "NotAllowedError"));
+  await pipeline.start(0);
+  assert.equal(pipeline.needsPlaybackGesture, true);
+  assert.ok(phases.includes("playback-blocked"));
+  video.play = () => Promise.resolve();
+  pipeline.requestPlayback();
+  await Promise.resolve();
+  assert.equal(pipeline.needsPlaybackGesture, false);
   await pipeline._cancelRun();
 });
 
