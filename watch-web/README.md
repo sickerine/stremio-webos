@@ -90,14 +90,14 @@ node scripts/pw-diag.mjs <url> [s] [chromium|firefox]   # browser diagnostics
 
 ## Public hostname (watch.khaslana.me)
 
-Quick tunnels (`cloudflared tunnel --url`) get a random trycloudflare.com name each run. For a
-fixed name the zone must be on Cloudflare DNS and the tunnel must be a named one:
+The zone is on Cloudflare DNS and a named tunnel (`watch`) carries the traffic; quick tunnels
+(`cloudflared tunnel --url`) would get a new random name every run. Setup, once per machine:
 
-1. Cloudflare dashboard -> Add a domain -> `khaslana.me` (Free). Change the nameservers at the
-   registrar (Namecheap) to the two Cloudflare gives you; wait until the zone shows Active.
-2. Zero Trust -> Networks -> Tunnels -> Create a tunnel -> Cloudflared -> name it `watch`.
-   Copy the token from the install command (the long string after `--token`).
-3. Public Hostnames tab: subdomain `watch`, domain `khaslana.me`, service `HTTP` ->
-   `watch-web:3211` (the compose service name; the tunnel container shares its network).
-4. In `watch-web/.env`: `CF_TUNNEL_TOKEN=<token>` and `COMPOSE_PROFILES=tunnel`, then
-   `docker compose up -d`. Stop any `cloudflared tunnel --url` still running.
+    cloudflared tunnel login                       # browser authorisation, writes ~/.cloudflared/cert.pem
+    cloudflared tunnel create watch                # writes ~/.cloudflared/<id>.json
+    cloudflared tunnel route dns watch watch.khaslana.me
+    mkdir -p cloudflared && cp ~/.cloudflared/<id>.json cloudflared/credentials.json
+    # cloudflared/config.yml: tunnel <id>, credentials-file, ingress watch.khaslana.me -> http://watch-web:3211
+    echo COMPOSE_PROFILES=tunnel >> .env && docker compose up -d
+
+`cloudflared/` is git-ignored (it holds the tunnel credentials).

@@ -23,14 +23,14 @@ services:
     restart: unless-stopped
 
   # Permanent public hostname via a named Cloudflare Tunnel (replaces `cloudflared tunnel --url`).
-  # Enabled by COMPOSE_PROFILES=tunnel and CF_TUNNEL_TOKEN in .env; see README "Public hostname".
+  # Enabled by COMPOSE_PROFILES=tunnel in .env; see README "Public hostname".
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: stremio-watch-web-tunnel
     profiles: ["tunnel"]
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro   # config.yml + credentials.json from `cloudflared tunnel create` (git-ignored)
     depends_on:
       watch-web:
         condition: service_healthy
