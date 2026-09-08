@@ -1,0 +1,51 @@
+--- main.js
++++ main.js
+@@ -237,21 +237,20 @@
+             n.d(t, {
+                 V9: () => S,
+                 aJ: () => i,
++                isWebOS: () => isWebOS,
+                 Vj: () => A
+             });
+             var r = n(9225);
+             n(8579), n(2808), n(7481), n(5235), n(1064), n(2432), n(7647), n(7055), n(7531), n(8994), n(9217), n(5636);
+             const o = (0, r.q6)({}),
+-                i = () => ({
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.270 Safari/537.36 WebAppManager": 25,
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.211 Safari/537.36 WebAppManager": 24,
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.128 Safari/537.36 WebAppManager": 23,
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36 WebAppManager": 22,
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36 WebAppManager": 6,
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.106 Safari/537.36 WebAppManager": 5,
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.34 Safari/537.36 WebAppManager": 4,
+-                    "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) QtWebEngine/5.2.1 Chrome/38.0.2125.122 Safari/537.36 WebAppManager": 3
+-                }[navigator.userAgent] || 0);
++                isWebOS = () => /\bWeb[0O]S\b/i.test(navigator.userAgent),
++                i = () => {
++                    if (!isWebOS()) return 0;
++                    // LG's published engine versions identify the OS version only.
++                    // An unknown engine must never change which platform/player we use.
++                    const chrome = navigator.userAgent.match(/Chrome\/(\d+)/i);
++                    return chrome ? ({ 38: 3, 53: 4, 68: 5, 79: 6, 87: 22, 94: 23, 108: 24, 120: 25, 132: 26 }[chrome[1]] || 0) : 0;
++                };
+             n(5894);
+             const a = () => {
+                     const e = navigator.userAgent.match(/Tizen (\d+\.\d+)/i);
+@@ -280,7 +279,7 @@
+             let d = u.WEB,
+                 h = null;
+             const f = i();
+-            f > 0 && (d = u.WEB_OS, h = f);
++            isWebOS() && (d = u.WEB_OS, h = f || null);
+             const v = a();
+             if (v > 0 && (d = u.TIZEN, h = v), d === u.WEB) {
+                 const e = s(),
+@@ -3018,7 +3017,7 @@
+                 O$: () => l
+             });
+             const r = JSON.parse('[{"locale":"العربية","ietf":"ar-AR","alpha3":["ara"]},{"locale":"български език","ietf":"bg-BG","alpha3":["bul"]},{"locale":"বাংলা","ietf":"bn-BD","alpha3":["ben"]},{"locale":"Català","ietf":"ca-CA","alpha3":["cat"]},{"locale":"Čeština","ietf":"cs-CZ","alpha3":["ces","cze"]},{"locale":"Dansk","ietf":"da-DK","alpha3":["dan"]},{"locale":"Deutsch","ietf":"de-DE","alpha3":["deu","ger"]},{"locale":"Ελληνική","ietf":"el-GR","alpha3":["ell","gre"]},{"locale":"English","ietf":"en-US","alpha3":["eng"]},{"locale":"Esperanto","ietf":"eo-EO","alpha3":["epo"]},{"locale":"Español","ietf":"es-ES","alpha3":["spa"]},{"locale":"Eesti","ietf":"et-EE","alpha3":["est"]},{"locale":"Euskara","ietf":"eu-ES","alpha3":["eus","baq"]},{"locale":"فارسی","ietf":"fa-IR","alpha3":["fas","per"]},{"locale":"Suomi","ietf":"fi-FI","alpha3":["fin"]},{"locale":"Français","ietf":"fr-FR","alpha3":["fra","fre"]},{"locale":"עברית","ietf":"he-IL","alpha3":["heb"]},{"locale":"हिन्दी","ietf":"hi-IN","alpha3":["hin"]},{"locale":"Hrvatski jezik","ietf":"hr-HR","alpha3":["hrv"]},{"locale":"Magyar nyelv","ietf":"hu-HU","alpha3":["hun"]},{"locale":"Bahasa Indonesia","ietf":"id-ID","alpha3":["ind"]},{"locale":"Italiano","ietf":"it-IT","alpha3":["ita"]},{"locale":"日本語","ietf":"ja-JP","alpha3":["jpn"]},{"locale":"한국어","ietf":"ko-KR","alpha3":["kor"]},{"locale":"Македонски јазик","ietf":"mk-MK","alpha3":["mkd","mac"]},{"locale":"ဗမာစာ","ietf":"my-BM","alpha3":["mya","bur"]},{"locale":"Norsk bokmål","ietf":"nb-NO","alpha3":["nob"]},{"locale":"नेपाली","ietf":"ne-NP","alpha3":["nep"]},{"locale":"Nederlands","ietf":"nl-NL","alpha3":["nld","dut"]},{"locale":"Norsk nynorsk","ietf":"nn-NO","alpha3":["nno"]},{"locale":"ਪੰਜਾਬੀ","ietf":"pa-IN","alpha3":["pan"]},{"locale":"Język polski","ietf":"pl-PL","alpha3":["pol"]},{"locale":"Português Brazil","ietf":"pt-BR","alpha3":["pob"]},{"locale":"Português","ietf":"pt-PT","alpha3":["por"]},{"locale":"Română","ietf":"ro-RO","alpha3":["ron","rum"]},{"locale":"Русский язык","ietf":"ru-RU","alpha3":["rus"]},{"locale":"Slovenski jezik","ietf":"sl-SL","alpha3":["slv"]},{"locale":"Српски језик","ietf":"sr-RS","alpha3":["srp"]},{"locale":"Svenska","ietf":"sv-SE","alpha3":["swe"]},{"locale":"తెలుగు","ietf":"te-IN","alpha3":["tel"]},{"locale":"Türkçe","ietf":"tr-TR","alpha3":["tur"]},{"locale":"Українська мова","ietf":"uk-UA","alpha3":["ukr"]},{"locale":"Tiếng Việt","ietf":"vi-VN","alpha3":["vie"]},{"locale":"中文(中华人民共和国)","ietf":"zh-CN","alpha3":["zho","chi"]},{"locale":"中文(香港特别行政區)","ietf":"zh-HK","alpha3":["zho","chi"]},{"locale":"中文(台灣)","ietf":"zh-TW","alpha3":["zho","chi"]}]');
+-            const o = (0, n(289).aJ)() > 0,
++            const o = (0, n(289).isWebOS)(),
+                 i = r,
+                 a = o ? [100, 125, 150, 175, 200] : [25, 50, 75, 100, 125, 150, 175, 200, 250],
+                 l = a[1] - a[0],
