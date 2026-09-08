@@ -162,3 +162,15 @@ test("relay calibrates the TV clock and rejects stale state after a timestamped 
     assert.equal(await read(), null, "a delayed pre-stop sample cannot restart the room");
   } finally { tv.close(); await server.close(); }
 });
+
+
+test("managed playback keeps a steady rate between explicit timeline events", () => {
+  for (const diff of [-2.5, -.5, .5, 2.5]) {
+    assert.deepEqual(syncAction(100, 100 + diff, { rateCorrection: false }), { type: "none", playbackRate: 1 });
+  }
+  assert.deepEqual(syncAction(100, 101, { rateCorrection: false, playbackRate: 1.5 }), { type: "none", playbackRate: 1.5 });
+  assert.equal(syncAction(100, 101, { rateCorrection: false, snap: true }).type, "seek");
+  assert.equal(syncAction(100, 101, { rateCorrection: false, paused: true }).type, "seek");
+  assert.equal(syncAction(100, 104, { rateCorrection: false }).type, "seek");
+  assert.equal(syncAction(100, 101).type, "rate", "desktop rate correction remains available");
+});
