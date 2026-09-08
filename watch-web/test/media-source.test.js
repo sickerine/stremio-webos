@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Pipeline } from "../web/src/player/pipeline.js";
+import { Pipeline, selectAudioEncoder } from "../web/src/player/pipeline.js";
 
 function environment(t, managedOnly) {
   const saved = ["MediaSource", "ManagedMediaSource"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]);
@@ -53,4 +53,19 @@ test("missing streaming APIs fail clearly before fetching media", async t => {
   Object.defineProperty(globalThis, "ManagedMediaSource", { configurable: true, value: undefined });
   const pipeline = new Pipeline({});
   await assert.rejects(pipeline.open("https://example.test/movie.mkv"), /does not support MediaSource or ManagedMediaSource/);
+});
+
+test("Safari uses AAC when it can encode Opus but cannot play Opus in MP4", async () => {
+  const calls = [];
+  const encoder = await selectAudioEncoder({ isTypeSupported: mime => mime.includes("mp4a.40.2") }, "hev1.2.4.L150.90", async codec => { calls.push(codec); return true; });
+  assert.deepEqual(encoder, { codec: "aac", codecString: "mp4a.40.2" });
+  assert.deepEqual(calls, ["aac"]);
+});
+
+test("Opus remains preferred when both encoding and MP4 playback support it", async () => {
+  assert.deepEqual(await selectAudioEncoder({ isTypeSupported: () => true }, "avc1.640028", async () => true), { codec: "opus", codecString: "opus" });
+});
+
+test("an audio encoder is unusable unless both playback and encoding are supported", async () => {
+  assert.equal(await selectAudioEncoder({ isTypeSupported: () => true }, "avc1.640028", async () => false), null);
 });
