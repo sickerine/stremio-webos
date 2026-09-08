@@ -1,0 +1,24 @@
+--- video.chunk.js
++++ video.chunk.js
+@@ -18794,15 +18794,18 @@
+                             var __tl = (d.audioTracks[__ai].language || "").toLowerCase(), __lb = (d.audioTracks[__ai].label || "").toLowerCase();
+                             if (__set.indexOf(__tl) >= 0 || __set.indexOf(__tl.substring(0, 2)) >= 0 || (__wantJa ? __lb.indexOf("japan") >= 0 : __lb.indexOf("english") >= 0)) { __prefIdx = __ai; break; }
+                         }
+-                        if (__prefIdx >= 0) {
++                        if (__prefIdx < 0) { for (var __e2 = 0; __e2 < d.audioTracks.length; __e2++) if (d.audioTracks[__e2].enabled) { __prefIdx = __e2; break; } if (__prefIdx < 0) __prefIdx = 0; }
++                        {
+                             for (var __aj = 0; __aj < d.audioTracks.length; __aj++) d.audioTracks[__aj].enabled = (__aj === __prefIdx);
+                             try {
+-                                if (window.webOS && window.webOS.service && d.mediaId) {
++                                (function __sel(__n) {
++                                    if (!(window.webOS && window.webOS.service)) return;
++                                    if (!d.mediaId) { if (__n > 0) setTimeout(function() { __sel(__n - 1); }, 300); return; }
+                                     window.webOS.service.request("luna://com.webos.media", {
+                                         method: "selectTrack",
+                                         parameters: { mediaId: d.mediaId, type: "audio", index: __prefIdx }
+                                     });
+-                                }
++                                })(40);
+                             } catch(__e) {}
+                         }
+                         S("audioTracks");
