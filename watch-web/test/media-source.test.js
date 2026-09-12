@@ -113,3 +113,69 @@ test("stop supersedes a pending seek without reviving a closed pipeline", async 
   assert.equal(pipeline.run, null);
   assert.equal(pipeline.tracks, null);
 });
+
+function bufferEnvironment(t, { quota = 1, canEvict = true, appendError = false } = {}) {
+  const { pipeline, video } = environment(t, false);
+  video.currentTime = 60;
+  const accepted = [], calls = [];
+  let start = 0, attempts = 0;
+  const sb = new EventTarget();
+  Object.assign(sb, {
+    updating: false,
+    buffered: { length: 1, start: () => canEvict ? start : 60, end: () => 150 },
+    appendBuffer(chunk) {
+      assert.equal(this.updating, false);
+      calls.push("append"); attempts++;
+      if (attempts <= quota) throw new DOMException("Buffer full", "QuotaExceededError");
+      this.updating = true;
+      setImmediate(() => {
+        if (appendError) this.dispatchEvent(new Event("error"));
+        else accepted.push([...chunk]);
+        this.updating = false; this.dispatchEvent(new Event("updateend"));
+      });
+    },
+    remove(a, b) {
+      assert.equal(this.updating, false);
+      calls.push("remove"); this.updating = true;
+      setImmediate(() => { start = b; this.updating = false; this.dispatchEvent(new Event("updateend")); });
+    },
+  });
+  pipeline.sourceBuffer = sb;
+  pipeline.mediaSource = { readyState: "open" };
+  return { pipeline, accepted, calls };
+}
+
+test("a full media buffer retries the same bytes after eviction before accepting the next chunk", async t => {
+  const { pipeline, accepted, calls } = bufferEnvironment(t);
+  await Promise.all([pipeline._append(Uint8Array.of(1, 2)), pipeline._append(Uint8Array.of(3, 4))]);
+  assert.deepEqual(accepted, [[1, 2], [3, 4]]);
+  assert.deepEqual(calls, ["append", "remove", "append", "append"]);
+});
+
+test("buffer pressure without removable history waits and can be cancelled without dropping into a later chunk", { timeout: 1500 }, async t => {
+  const { pipeline, accepted } = bufferEnvironment(t, { quota: Infinity, canEvict: false });
+  let completed = false;
+  const writing = pipeline._append(Uint8Array.of(1)).then(() => { completed = true; });
+  await new Promise(r => setTimeout(r, 25));
+  assert.equal(completed, false);
+  await pipeline.close();
+  await writing;
+  assert.deepEqual(accepted, []);
+});
+
+test("asynchronous SourceBuffer errors reject the write instead of reporting successful append", async t => {
+  const { pipeline, accepted } = bufferEnvironment(t, { quota: 0, appendError: true });
+  await assert.rejects(pipeline._append(Uint8Array.of(1)), /SourceBuffer/);
+  assert.deepEqual(accepted, []);
+});
+
+test("cancelling a feed releases an append waiting for buffer space", { timeout: 1500 }, async t => {
+  const { pipeline, accepted } = bufferEnvironment(t, { quota: Infinity, canEvict: false });
+  pipeline.run = { cancelled: false, output: { cancel: () => pipeline.appendQueue } };
+  const writing = pipeline._append(Uint8Array.of(1));
+  await new Promise(r => setTimeout(r, 25));
+  await pipeline._cancelRun();
+  await writing;
+  assert.deepEqual(accepted, []);
+  assert.equal(pipeline.run, null);
+});

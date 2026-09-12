@@ -190,7 +190,8 @@ async function follow() {
     if (session !== s || !tvState || tvState.sessionId !== s.id || tvState.paused || tvState.buffering) return;
     target = estimateTvPosition(tvState);
   }
-  if (video.readyState < 2) return;
+  // HAVE_METADATA can mean the current frame was lost to a buffer gap. Seeking
+  // to a buffered TV position is what restores it; do not gate recovery on a frame.
 
   const act = syncAction(video.currentTime, target, { paused: hold, snap: Boolean(correction), playbackRate,
     rateCorrection: s.pipeline.MediaSource !== globalThis.ManagedMediaSource });
@@ -200,7 +201,8 @@ async function follow() {
     // mux has had a few seconds to build toward the last target, or the browser will
     // restart forever while the TV keeps moving ahead of a cold buffer.
     const run = s.pipeline.run;
-    const feedIsClose = run && !run.cancelled && run.fedTs != null && target >= run.startAt && target - run.fedTs < FEED_WAIT_S;
+    const feedIsClose = run && !run.cancelled && run.fedTs != null && target >= run.startAt &&
+      target >= run.fedTs && target - run.fedTs < FEED_WAIT_S;
     if (s.pipeline.isBuffered(target)) {
       seeking = true;
       syncStats.seeks++;
@@ -256,6 +258,8 @@ setInterval(() => {
     video: p.tracks && `${p.tracks.video.codec} ${p.tracks.video.width}x${p.tracks.video.height}`, audio: a && `${a.codec} ${a.channels}ch ${a.transcode ? "transcode" : "direct"}`, audios: p.tracks?.audios.map(x => `${x.codec}:${x.playable ? "ok" : "no"}`),
     feed: p.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, startAt: +p.run.startAt.toFixed(1) }, starts: p.startCount || 0, opens: session.opens || 0, stage: ui.el.overlay.hidden ? null : ui.el.ovTitle.textContent,
     source: { type: p.mediaSource?.constructor.name, state: p.mediaSource?.readyState, priming: p.priming, gesture: p.needsPlaybackGesture },
+    bufferWrites: p.bufferStats, seeking: video.seeking, mediaError: video.error && { code: video.error.code, message: video.error.message },
+    userAgent: navigator.userAgent, sessionId: session.id,
     subs: { sel: session.selectedSub, ass: session.ass.activeTrack, assPushed: session.ass.pushed, assDupes: session.ass.dupes || 0, textDupes: session.text.dupes, textCues: session.text.active != null ? (session.text.tracks.get(session.text.active)?.cues?.length ?? null) : null, streams: session.demux.stats.streamsOpened, cues: session.demux.stats.cues },
     recent: recent.map(e => [new Date(e.t).toISOString().slice(11, 23), e.k, e.s, e.st, e.ms]) } });
 }, 10000);
@@ -332,6 +336,7 @@ window.__watch = () => {
     clock: relay.clock(),
     video: { t: video.currentTime, paused: video.paused, rs: video.readyState, rate: video.playbackRate, muted: video.muted, w: video.videoWidth, h: video.videoHeight, error: video.error && `${video.error.code} ${video.error.message}` },
     buffered: p?.buffered() || [],
+    bufferWrites: p?.bufferStats,
     tracks: p?.tracks && { video: { codec: p.tracks.video.codec, codecString: p.tracks.video.codecString, hdr: p.tracks.video.hdr }, audios: p.tracks.audios.map(a => ({ id: a.id, lang: a.language, codec: a.codec, ch: a.channels, playable: a.playable })), duration: p.tracks.duration },
     selectedAudio: p?.selectedAudioId ?? null,
     subs: s && { tracks: s.subTracks.map(t => ({ n: t.number, lang: t.language, type: t.type, name: t.name })), selected: s.selectedSub, fonts: s.fonts, assEvents: Object.fromEntries([...s.ass.events].map(([k, v]) => [k, v.length])), activeAss: s.ass.activeTrack, jassub: Boolean(s.ass.jassub), jassubReady: s.ass.ready, pushed: s.ass.pushed, showCalls: s.ass.showCalls, assError: s.ass.lastError, demux: { ...s.demux.stats, firstCluster: s.demux.firstCluster, headerCursor: s.demux.headerCursor, cursor: s.demux.cursor, pending: s.demux.pending.size }, bitmap: { ...s.bitmap.stats, active: s.bitmap.active, drawn: s.bitmap.drawn, demux: s.bdemux.stats } },
