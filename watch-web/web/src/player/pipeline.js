@@ -58,6 +58,7 @@ export class Pipeline {
     this.tracks = null;
     this.selectedAudioId = null;
     this.appendQueue = Promise.resolve();
+    this.bufferStats = { quotaExceeded: 0, retries: 0, appendErrors: 0 };
     this.pendingFirstAppend = null;
     this.priming = false;
     this.playRequested = false;
@@ -140,6 +141,7 @@ export class Pipeline {
     const active = () => generation === this.generation;
     await this._cancelRun();
     if (!active()) return;
+    this.appendQueue = Promise.resolve();
     this.selectedAudioId = audioId;
     const audio = this.tracks.audios.find(a => a.id === audioId) || null;
     const audioMime = audio?.outputCodecString ?? null;
@@ -182,7 +184,7 @@ export class Pipeline {
 
     const run = { cancelled: false, output: null, startAt, audioId, nv: 0, na: 0, stage: "init", transcode: Boolean(audio?.transcode) };
     this.run = run;
-    const writable = new WritableStream({ write: chunk => this._append(chunk) });
+    const writable = new WritableStream({ write: chunk => this._append(chunk, generation) });
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: "fragmented", minimumFragmentDuration: 1 }), target: new AppendOnlyStreamTarget(writable) });
     run.output = output;
     // (no track metadata: MSE ignores it and mediabunny insists on ISO 639-2 codes)
@@ -263,7 +265,7 @@ export class Pipeline {
       // INTERSECTION of the track buffers, so audio must fully cover each video
       // fragment or the range fragments into gaps.
       await pumpAudioTo(p.timestamp + 3);
-      if ((nv & 7) === 0) { await throttle(); this._evict(); }
+      if ((nv & 7) === 0) { await throttle(); if (!run.cancelled) await this._evict(); }
     }
     if (run.cancelled) { aSample?.close?.(); return; }
     await pumpAudioTo(Infinity);
@@ -274,34 +276,59 @@ export class Pipeline {
   }
 
   // ---- MSE plumbing ----
-  _append(chunk) {
-    const sb = this.sourceBuffer;
-    this.appendQueue = this.appendQueue.then(() => new Promise((resolve, reject) => {
-      if (!sb || this.mediaSource?.readyState !== "open") return resolve();
-      const go = () => {
-        try { sb.appendBuffer(chunk); } catch (e) { return reject(e); }
-        sb.addEventListener("updateend", () => resolve(), { once: true });
-      };
-      if (sb.updating) sb.addEventListener("updateend", go, { once: true }); else go();
-    })).catch(e => {
-      if (e?.name === "QuotaExceededError") { this._evict(true); return; }
-      // Detached/removed SourceBuffer: this pipeline lost the element to a newer one. Stop quietly.
-      if (e?.name === "InvalidStateError") { if (this.run) this.run.cancelled = true; return; }
-      this.onError?.(e);
+  _append(chunk, generation = this.generation) {
+    const sb = this.sourceBuffer, run = this.run;
+    const active = () => sb && sb === this.sourceBuffer && generation === this.generation &&
+      !run?.cancelled && this.mediaSource?.readyState === "open";
+    this.appendQueue = this.appendQueue.then(async () => {
+      while (active()) {
+        try {
+          await this._whenIdle(sb);
+          if (!active()) return;
+          await this._update(sb, () => sb.appendBuffer(chunk));
+          return;
+        } catch (error) {
+          if (!active()) return;
+          if (error.name !== "QuotaExceededError") { this.bufferStats.appendErrors++; throw error; }
+          this.bufferStats.quotaExceeded++;
+          // A rejected append has not consumed these bytes. Keep the writer blocked
+          // until the SAME chunk fits; skipping it leaves permanent holes in the mux.
+          // Preserve decode dependencies behind the playhead, including while paused.
+          const removed = await this._evict();
+          if (!removed) await new Promise(resolve => setTimeout(resolve, 250));
+          this.bufferStats.retries++;
+        }
+      }
     });
     return this.appendQueue;
   }
-  _whenIdle() { return new Promise(r => { const sb = this.sourceBuffer; if (!sb || !sb.updating) return r(); sb.addEventListener("updateend", () => r(), { once: true }); }); }
-  _remove(a, b) { return new Promise(r => { const sb = this.sourceBuffer; try { sb.remove(a, b); sb.addEventListener("updateend", () => r(), { once: true }); } catch { r(); } }); }
+  _whenIdle(sb = this.sourceBuffer) { return new Promise(r => { if (!sb || !sb.updating) return r(); sb.addEventListener("updateend", () => r(), { once: true }); }); }
+  _update(sb, action) {
+    return new Promise((resolve, reject) => {
+      const finish = error => {
+        sb.removeEventListener("updateend", done); sb.removeEventListener("error", failed); sb.removeEventListener("abort", aborted);
+        error ? reject(error) : resolve();
+      };
+      const done = () => finish();
+      const failed = () => finish(new Error("SourceBuffer could not process the media data"));
+      const aborted = () => finish(new DOMException("SourceBuffer update aborted", "AbortError"));
+      sb.addEventListener("updateend", done); sb.addEventListener("error", failed); sb.addEventListener("abort", aborted);
+      try { action(); } catch (error) { finish(error); }
+    });
+  }
+  async _remove(a, b) { const sb = this.sourceBuffer; await this._whenIdle(sb); if (sb && sb === this.sourceBuffer) await this._update(sb, () => sb.remove(a, b)); }
   // `.buffered` throws InvalidStateError once the SourceBuffer is detached from its
   // MediaSource (element re-attached elsewhere); treat that as "nothing buffered".
   _ranges() { try { return this.sourceBuffer?.buffered || null; } catch { return null; } }
   _bufferedEnd() { const b = this._ranges(); if (!b || !b.length) return null; const t = this.video.currentTime; for (let i = 0; i < b.length; i++) if (t >= b.start(i) - 0.5 && t <= b.end(i) + 0.5) return b.end(i); return b.end(b.length - 1); }
   buffered() { const b = this._ranges(); const out = []; if (b) for (let i = 0; i < b.length; i++) out.push([b.start(i), b.end(i)]); return out; }
-  _evict(force = false) {
-    const sb = this.sourceBuffer, b = this._ranges(); if (!sb || sb.updating || !b || !b.length) return;
-    const t = this.video.currentTime, keep = Math.min(force ? 10 : Infinity, this.bufferPolicy.behindSeconds);
-    if (b.start(0) < t - keep - 5) { try { sb.remove(0, t - keep); } catch {} }
+  async _evict() {
+    const sb = this.sourceBuffer;
+    await this._whenIdle(sb);
+    const b = this._ranges(); if (!sb || sb !== this.sourceBuffer || !b || !b.length) return false;
+    const cutoff = this.video.currentTime - this.bufferPolicy.behindSeconds;
+    if (b.start(0) < cutoff - 5) { await this._remove(0, cutoff); return true; }
+    return false;
   }
   async _cancelRun() {
     const run = this.run; if (!run) return;
