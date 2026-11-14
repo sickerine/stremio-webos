@@ -66,11 +66,13 @@ export class ByteSource {
     throw new Error("Could not determine file size from the CDN");
   }
 
-  _fetchChunk(index) {
+  // `sameRead`: a later chunk of one read. However long the read (mediabunny takes a
+  // file's whole font section in one), it stays on the stream its first chunk is on.
+  _fetchChunk(index, sameRead = false) {
     const cached = this.chunks.get(index);
     if (cached) { this._want(index); return cached; }
     const s = this.stream;
-    if (s && index >= s.next && index <= s.next + FOLLOW_WINDOW) {          // rides the open stream
+    if (s && index >= s.next && (sameRead || index <= s.next + FOLLOW_WINDOW)) {   // rides the open stream
       for (let i = s.next; i <= index; i++) this._reserve(s, i);
       this._want(index);
       return this.chunks.get(index);
@@ -205,7 +207,7 @@ export class ByteSource {
     const first = Math.floor(start / this.chunkSize);
     const last = Math.floor((end - 1) / this.chunkSize);
     const pending = [];
-    for (let i = first; i <= last; i++) pending.push(this._fetchChunk(i));
+    for (let i = first; i <= last; i++) pending.push(this._fetchChunk(i, i > first));
     this._want(last);
     const parts = await Promise.all(pending);
     if (parts.length === 1) {
@@ -230,8 +232,13 @@ export class ByteSource {
   setTee(tee) { this.tee = tee; }
   _teeMaybe(start, bytes) { try { this.tee?.write(start, bytes); } catch {} }
 
-  // Explicitly pull a region (used to walk the header for tracks + fonts).
-  async prefetch(start, end) { await this.read(start, Math.min(end, this.size ?? end)); }
+  // Read forward from the start of the file until `done()` says so, at most `limit` bytes
+  // (the header walk: the tee picks subtitle tracks and fonts out of it).
+  async readUntil(done, limit) {
+    if (this.size == null) await this.getSize();
+    const end = Math.min(limit, this.size);
+    for (let at = 0; at < end && !done(); at += this.chunkSize) await this.read(at, Math.min(at + this.chunkSize, end));
+  }
 
   dispose() { const s = this.stream; this.stream = null; s?.abort.abort(); s?.wake?.(); this.chunks.clear(); this.order.length = 0; this.tee = null; }
 }

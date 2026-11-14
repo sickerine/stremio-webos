@@ -86,6 +86,7 @@ Point the TV bridge at `ws://YOUR_IP:3211/ws`.
 npm test                                    # pure logic (sync, relay, byte source)
 node scripts/tv-sim.mjs                      # a TV simulator (URL=... POS=... PAUSED=1)
 node scripts/pw-diag.mjs <url> [s] [chromium|firefox]   # browser diagnostics
+npm run build && node scripts/pw-e2e.mjs    # a real browser follows a fake TV: sound, a skip, a flickering start (needs ffmpeg)
 ```
 
 ## Public hostname (watch.khaslana.me)

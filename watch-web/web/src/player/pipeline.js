@@ -5,7 +5,7 @@
 // mediabunny extension and re-encoded to Opus or AAC in-browser (the only track that costs
 // CPU, and audio is cheap).
 import {
-  Input, Output, MATROSKA, Mp4OutputFormat, AppendOnlyStreamTarget, StreamSource, canEncodeAudio,
+  Input, Output, MATROSKA, WEBM, MP4, Mp4OutputFormat, AppendOnlyStreamTarget, StreamSource, canEncodeAudio,
   EncodedPacketSink, EncodedVideoPacketSource, EncodedAudioPacketSource, AudioSampleSink, AudioSampleSource, AudioSample,
 } from "mediabunny";
 import { downmixToStereo } from "./downmix.js";
@@ -24,6 +24,7 @@ const MANAGED_BUFFER = { ...DESKTOP_BUFFER, aheadSeconds: 15, aheadBytes: 24 * 1
   maxCachedChunks: 4, prefetchAhead: 1, rangeBytes: 32 * 1024 * 1024 };
 const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
 const AUDIO_BITRATE = 256_000;
+const AUDIO_LEAD_IN = 0.04;   // seconds: longer than one AAC (21 ms) or Dolby (32 ms) packet
 
 function toStereo(sample) {
   const ch = sample.numberOfChannels, frames = sample.numberOfFrames;
@@ -93,7 +94,7 @@ export class Pipeline {
     if (tee) source.setTee(tee);
     this.source = source;
     const fileSize = await source.getSize();
-    this.input = new Input({ formats: [MATROSKA], source: new StreamSource({ getSize: () => fileSize, read: (s, e) => source.read(s, e), maxCacheSize: 8 * 1024 * 1024 }) });
+    this.input = new Input({ formats: [MATROSKA, WEBM, MP4], source: new StreamSource({ getSize: () => fileSize, read: (s, e) => source.read(s, e), maxCacheSize: 8 * 1024 * 1024 }) });
 
     const video = await this.input.getPrimaryVideoTrack();
     if (!video) throw new Error("No video track in file");
@@ -209,17 +210,30 @@ export class Pipeline {
     const v = this.tracks.video.track;
     const vSink = new EncodedPacketSink(v);
     const vKey = (await vSink.getKeyPacket(startAt)) || (await vSink.getFirstKeyPacket());
+    if (run.cancelled) return;                      // superseded during the lookup: read nothing more
     if (!vKey) throw new Error("No keyframe found");
     const vCfg = await v.getDecoderConfig();
 
     // Audio: passthrough (encoded packets) or transcode to the negotiated codec.
     const aTrack = audio?.track || null;
     const transcode = Boolean(audio?.transcode);
-    const packetSink = aTrack && !transcode ? new EncodedPacketSink(aTrack) : null;
+    const aSink = aTrack ? new EncodedPacketSink(aTrack) : null;
+    const packetSink = transcode ? null : aSink;
     const aCfg = packetSink ? await aTrack.getDecoderConfig() : null;
-    let aPacket = packetSink ? ((await packetSink.getPacket(vKey.timestamp)) || (await packetSink.getFirstPacket())) : null;
+    // The audio packet playing at the key frame sits at the end of the previous cluster,
+    // megabytes back, and reading it restarts the download. Begin with the first packet of
+    // the key frame's own cluster instead, unless that leaves the start position silent.
+    let aFirst = aSink ? await aSink.getPacket(vKey.timestamp + AUDIO_LEAD_IN) : null;
+    if (aFirst && aFirst.timestamp > startAt) aFirst = await aSink.getPacket(vKey.timestamp);
+    aFirst ||= aSink ? await aSink.getFirstPacket() : null;
+    let aPacket = packetSink ? aFirst : null;
+    if (run.cancelled) return;
     run.stage = "audio-init";
-    const sampleIter = aTrack && transcode ? new AudioSampleSink(aTrack).samples(vKey.timestamp) : null;
+    // Both iterators read ahead on their own. A cancelled run has to stop asking for bytes
+    // at once, or its next read drags the download back to the position the TV just left.
+    const sampleIter = aFirst && transcode ? new AudioSampleSink(aTrack).samples(aFirst.timestamp) : null;
+    const vPackets = vSink.packets(vKey);
+    run.stop = () => { void vPackets.return(); void sampleIter?.return(); };
     let aSample = sampleIter ? (await sampleIter.next()).value || null : null;
     run.stage = "feeding";
     let nv = 0, na = 0, lastTs = startAt;
@@ -259,7 +273,7 @@ export class Pipeline {
       }
     };
 
-    for await (const p of vSink.packets(vKey)) {
+    for await (const p of vPackets) {
       if (run.cancelled) break;
       await vSrc.add(p, nv === 0 ? { decoderConfig: vCfg } : undefined); nv++; run.nv = nv; lastTs = p.timestamp; run.fedTs = lastTs;
       // Keep audio a few seconds ahead of video: MSE's playable range is the
@@ -334,6 +348,7 @@ export class Pipeline {
   async _cancelRun() {
     const run = this.run; if (!run) return;
     run.cancelled = true; this.run = null;
+    run.stop?.();
     try { await run.output?.cancel(); } catch {}
     await this.appendQueue.catch(() => {});
   }

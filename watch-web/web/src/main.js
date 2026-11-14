@@ -1,7 +1,7 @@
 import { buildUi } from "./ui.js";
 import { connectRelay } from "./relay.js";
 import { Pipeline } from "./player/pipeline.js";
-import { SubtitleDemux, AssRenderer } from "./subtitles/ass.js";
+import { SubtitleDemux, AssRenderer, HEADER_MAX_BYTES } from "./subtitles/ass.js";
 import { BitmapDemux } from "./subtitles/bitmap-demux.js";
 import { BitmapRenderer } from "./subtitles/bitmap.js";
 import { TextSubtitles } from "./subtitles/text.js";
@@ -24,6 +24,8 @@ let lastJumpAt = 0;
 const JUMP_COOLDOWN_MS = 10000;   // min gap between jumps that only correct drift, so a slow seek can't loop
 let offSince = 0;                 // when this browser started waiting on a seek it could not make yet
 const STUCK_MS = 15000;           // never wait longer than this for the mux; restart it at the TV's position
+const MAX_RESTARTS = 3;           // automatic restarts after a failure, counted while failures keep coming
+const RESTART_WINDOW_MS = 60000;  // a failure this long after the last one starts the count again
 
 const prefs = { audio: localStorage.getItem("watch.audio") || "", subs: localStorage.getItem("watch.subs") || "eng" };
 
@@ -37,14 +39,14 @@ const CODEC_NAMES = { aac: "AAC", ac3: "Dolby", eac3: "Dolby", dts: "DTS", flac:
 function codecName(c) { return CODEC_NAMES[c] || String(c || "").toUpperCase(); }
 function fmtLang(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch { return code || "und"; } }
 
-// The TV bridge sends document.title ("Stremio") when the item has no series id (movies).
-// Derive a readable title from the release filename instead.
+// The TV bridge sends the episode id ("kitsu:50497:5", "tt33043892:2:3") for a series and
+// document.title ("Stremio") for a movie. Neither is a name: derive one from the release filename.
 function titleFor(state) {
   const raw = (state.title || "").trim();
-  if (raw && !/^stremio$/i.test(raw)) return raw;
+  if (raw && !/^(?:stremio|(?:kitsu|tmdb|tt)[:\d]+)$/i.test(raw)) return raw;
   try {
     const seg = decodeURIComponent(new URL(state.mediaUrl).pathname.split("/").filter(Boolean).pop() || "");
-    const stem = seg.replace(/\.[a-z0-9]{2,4}$/i, "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
+    const stem = seg.replace(/\.[a-z0-9]{2,4}$/i, "").replace(/(?:\s*[[(][^\])]*[\])])+$/, "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
     const m = stem.match(/^(.*?)(?:\s|\(|\[)?(19|20)\d{2}\b/);
     let name = (m ? m[1] : stem.split(/\s(?=\d{3,4}p\b|2160p|1080p|720p|blu-?ray|web-?dl|webrip|hdtv|uhd|remux|x26[45]|h\.?26[45]|hevc|hdr|dv\b)/i)[0]).trim();
     const year = m ? stem.slice(m.index + m[1].length).match(/(19|20)\d{2}/)?.[0] : null;
@@ -92,7 +94,7 @@ async function startSession(sessionId, cdnUrl, size) {
   await endSession();
   if (session) return;                       // a later transition already took over
   ui.setStage("open");
-  ui.overlay(true, tvState?.title || "Opening the stream", "Preparing it for your browser.");
+  ui.overlay(true, tvState ? titleFor(tvState) : "Opening the stream", "Preparing it for your browser.");
   const s = { id: sessionId, cdnUrl, size, starting: true, subTracks: [], textTracks: [], bitmapTracks: [], selectedSub: null, fonts: 0 };
   s.ass = new AssRenderer(video, ui.el.assLayer);
   s.text = new TextSubtitles(video);
@@ -111,7 +113,7 @@ async function startSession(sessionId, cdnUrl, size) {
   s.pipeline = new Pipeline(video, {
     onTracks: t => { renderAudioMenu(); ui.setStats(`${t.video.height}p${t.video.hdr ? " HDR" : ""}`); },
     onStatus: status => { if (session === s && status.phase === "playback-blocked") ui.showSoundPrompt(true, true); },
-    onError: e => { console.error(e); if (session === s) ui.overlay(true, "Playback problem", e.message); },
+    onError: e => recover(s, "Playback problem", e),
   });
   session = s;
   try {
@@ -120,8 +122,12 @@ async function startSession(sessionId, cdnUrl, size) {
     ui.setStage("load");
     const t = s.pipeline.tracks;
     ui.setFacts([{ icon: "film", text: `${t.video.width}×${t.video.height}${t.video.hdr ? " HDR" : ""}` }, { icon: "audio", text: `${t.audios.length} audio` }, { text: `${(t.size / 1073741824).toFixed(1)} GB` }]);
-    // walk the header for subtitle tracks + fonts (tracks usually arrive within the first MB)
-    void s.pipeline.source.prefetch(0, 16 * 1024 * 1024).catch(() => {});
+    // Subtitle tracks and fonts sit before the first picture data. Read exactly that far
+    // before the playback download starts, so the two never compete for the connection.
+    // The teardown for a new stream queues behind this start, so watch for the request itself.
+    const superseded = () => session !== s || requestedStart !== sessionId;
+    await s.pipeline.source.readUntil(() => s.demux.settled || superseded(), HEADER_MAX_BYTES).catch(() => {});
+    if (superseded()) return;
     const startAt = estimateTvPosition(tvState) ?? 0;
     const preferred = prefs.audio ? s.pipeline.tracks.audios.find(a => a.language === prefs.audio && a.playable)?.id : undefined;
     lastRemuxAt = Date.now();
@@ -130,14 +136,32 @@ async function startSession(sessionId, cdnUrl, size) {
     renderAudioMenu();               // now that the default audio track is chosen
     await s.pipeline.present(() => {
       video.currentTime = estimateTvPosition(tvState) ?? startAt;
-      if (tvState && !tvState.paused && !tvState.buffering) return video.play();
+      // The TV pausing or loading at this moment interrupts play(); follow() resumes it.
+      if (tvState && !tvState.paused && !tvState.buffering) return video.play().catch(e => { if (e.name !== "AbortError") throw e; });
     });
     s.starting = false;
     if (session === s) void follow();
   } catch (e) {
+    if (s.pipeline.tracks) return recover(s, "Can't play this stream", e);
     console.error(e);
     if (session === s) { ui.setStage(null); ui.overlay(true, "Can't play this stream", e.message); }
   }
+}
+
+// A start that failed after the file opened, a download that gave up or a decoder
+// error is usually passing: start again from the TV's position. Only several
+// failures in a row leave the viewer with the message.
+let restarts = { id: null, count: 0, at: 0 };
+function recover(s, title, error) {
+  console.error(error);
+  if (session !== s || s.recovering) return;      // one failure can surface as a feed error, a video error and a rejected play()
+  s.recovering = true;
+  const now = Date.now();
+  if (restarts.id !== s.id || now - restarts.at > RESTART_WINDOW_MS) restarts = { id: s.id, count: 0, at: now };
+  restarts.at = now;
+  if (++restarts.count > MAX_RESTARTS) { ui.setStage(null); ui.overlay(true, title, error.message); return; }
+  ui.overlay(true, tvState ? titleFor(tvState) : "Opening the stream", "Playback stopped. Starting it again.");
+  setTimeout(() => queued(() => session === s ? startSession(s.id, s.cdnUrl, s.size) : Promise.resolve()), 1000 * restarts.count);
 }
 
 function renderAudioMenu() {
@@ -155,18 +179,21 @@ function renderSubsMenu() {
   const items = s.subTracks.map(t => ({ id: t.number, ...trackParts(t.language || "eng", t.name), tag: tag(t) }));
   ui.subsMenu(items, s.selectedSub, id => selectSub(id, true));
 }
+// Bitmap and text tracks are reported separately, in either order. Until the viewer
+// chooses, pick again each time: text tracks are listed first, so styled subtitles
+// win over a picture-based copy of the same language.
 function autoSelectSub() {
-  const s = session; if (!s || s.selectedSub != null) return;
+  const s = session; if (!s || s.userPickedSub) return;
   if (prefs.subs === "off") return;
   const byLang = s.subTracks.filter(t => (t.language || "eng").startsWith(prefs.subs || "eng"));
   const pick = byLang.find(t => !/forced|signs|songs/i.test(t.name || "")) || byLang[0] || s.subTracks[0];
-  if (pick) selectSub(pick.number, false);
+  if (pick && pick.number !== s.selectedSub) selectSub(pick.number, false);
 }
 async function selectSub(number, user) {
   const s = session; if (!s) return;
   s.selectedSub = number;
   const t = s.subTracks.find(x => x.number === number);
-  if (user) { prefs.subs = number == null ? "off" : (t?.language || "eng"); localStorage.setItem("watch.subs", prefs.subs); }
+  if (user) { s.userPickedSub = true; prefs.subs = number == null ? "off" : (t?.language || "eng"); localStorage.setItem("watch.subs", prefs.subs); }
   if (number == null) { await s.ass.hide(); s.text.hide(); s.bitmap.hide(); }
   else if (t?.type === "ass" || t?.type === "ssa") { s.text.hide(); s.bitmap.hide(); await s.ass.show(number); }
   else if (t?.type === "pgs" || t?.type === "vobsub") { s.text.hide(); await s.ass.hide(); await s.bitmap.show(number); }
@@ -235,7 +262,7 @@ async function follow() {
         await s.pipeline.start(Math.max(0, target - 2));
         if (session === s && tvState?.sessionId === s.id) {
           await s.pipeline.present(() => { video.currentTime = estimateTvPosition(tvState); });
-          if (!pendingCorrection) pendingCorrection = { sessionId: s.id, sequence: tvState.sequence };
+          if (!pendingCorrection && tvState) pendingCorrection = { sessionId: s.id, sequence: tvState.sequence };   // the TV may have stopped while the frame was presented
         }
       } finally { seeking = false; }
       setPlaybackRate(playbackRate);
@@ -261,7 +288,7 @@ setInterval(() => {
     cachedChunks: src.order.length, cacheLimitMB: src.maxCachedChunks * src.chunkSize / 1048576,
     t: video.currentTime.toFixed(1), tv: tvState && +estimateTvPosition(tvState).toFixed(1), paused: video.paused, rs: video.readyState, buffered: p.buffered().map(r => r.map(x => +x.toFixed(0))),
     video: p.tracks && `${p.tracks.video.codec} ${p.tracks.video.width}x${p.tracks.video.height}`, audio: a && `${a.codec} ${a.channels}ch ${a.transcode ? "transcode" : "direct"}`, audios: p.tracks?.audios.map(x => `${x.codec}:${x.playable ? "ok" : "no"}`),
-    feed: p.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, startAt: +p.run.startAt.toFixed(1) }, starts: p.startCount || 0, opens: session.opens || 0, stage: ui.el.overlay.hidden ? null : ui.el.ovTitle.textContent,
+    feed: p.run && { stage: p.run.stage, nv: p.run.nv, na: p.run.na, startAt: +p.run.startAt.toFixed(1) }, starts: p.startCount || 0, opens: session.opens || 0, stage: ui.el.overlay.hidden ? null : `${ui.el.ovTitle.textContent}: ${ui.el.ovBody.textContent}`.slice(0, 300),
     source: { type: p.mediaSource?.constructor.name, state: p.mediaSource?.readyState, priming: p.priming, gesture: p.needsPlaybackGesture },
     bufferWrites: p.bufferStats, seeking: video.seeking, mediaError: video.error && { code: video.error.code, message: video.error.message },
     userAgent: navigator.userAgent, sessionId: session.id,
@@ -281,7 +308,7 @@ video.addEventListener("playing", () => { clearTimeout(waitingTimer); ui.setTv(.
 // A decoder failure (e.g. a browser whose HEVC hardware path is broken) never reaches the
 // pipeline: the element just drops its buffered ranges and sits at HAVE_METADATA. Say so.
 const MEDIA_ERR = { 1: "aborted", 2: "network error", 3: "decoding failed", 4: "format not supported" };
-video.addEventListener("error", () => { const e = video.error; if (!e) return; console.error("video error", e.code, e.message); ui.overlay(true, "Playback problem", `This browser could not decode the stream (${MEDIA_ERR[e.code] || e.code}${e.message ? `: ${e.message}` : ""}).`); });
+video.addEventListener("error", () => { const e = video.error; if (!e || !session) return; recover(session, "Playback problem", new Error(`This browser could not decode the stream (${MEDIA_ERR[e.code] || e.code}${e.message ? `: ${e.message}` : ""}).`)); });
 
 ui.onSound(() => {
   if (session?.pipeline.needsPlaybackGesture) {

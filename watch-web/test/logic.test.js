@@ -133,6 +133,38 @@ test("ByteSource bounds requests and cache while reading across windows and the 
   } finally { src.dispose(); }
 });
 
+test("one long read is served by one request, in file order", async () => {
+  const file = Uint8Array.from({ length: 1031 }, (_, i) => i % 251);
+  const ranges = [], teed = [];
+  const src = new ByteSource("https://x/file", { size: file.length, chunkSize: 32,
+    fetchImpl: async (_url, { headers }) => { ranges.push(headers.Range); return new Response(file.slice(+/bytes=(\d+)-/.exec(headers.Range)[1]), { status: 206 }); } });
+  src.setTee({ write: offset => teed.push(offset) });
+  try {
+    // 20 chunks: a file's font section, far longer than the window a seek is told apart by
+    assert.deepEqual(await src.read(10, 650), file.slice(10, 650));
+    assert.deepEqual(ranges, ["bytes=0-"]);
+    assert.deepEqual(teed.slice(0, 21), Array.from({ length: 21 }, (_, i) => i * 32));
+  } finally { src.dispose(); }
+});
+
+test("the header walk reads until the consumer has what it needs, and never past its cap", async () => {
+  const file = Uint8Array.from({ length: 1031 }, (_, i) => i % 251);
+  const make = () => {
+    const src = new ByteSource("https://x/file", { size: file.length, chunkSize: 32, prefetchAhead: 0,
+      fetchImpl: async (_url, { headers }) => new Response(file.slice(+/bytes=(\d+)-/.exec(headers.Range)[1]), { status: 206 }) });
+    let teed = 0; src.setTee({ write: (offset, bytes) => { teed = Math.max(teed, offset + bytes.byteLength); } });
+    return { src, teed: () => teed };
+  };
+  const header = make();                                        // the first picture data starts at byte 300
+  await header.src.readUntil(() => header.teed() >= 300, 1000);
+  assert.equal(header.src.bytesFetched, 320, "stopped at the chunk holding byte 300");
+  header.src.dispose();
+  const endless = make();                                       // a header that never ends
+  await endless.src.readUntil(() => false, 100);
+  assert.equal(endless.src.bytesFetched, 128, "stopped at the cap");
+  endless.src.dispose();
+});
+
 test("relay marks a room idle when the TV stops heartbeating", async () => {
   const server = createRelayServer({ resolve: async url => ({ url, size: null }), staleMs: 120 });
   await server.listen(0, "127.0.0.1");

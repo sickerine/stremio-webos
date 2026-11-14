@@ -19,7 +19,8 @@ import jassubFallbackFontUrl from "jassub/dist/default.woff2?url";
 // matroska-subtitles ships a classic UMD bundle (sets window.MatroskaSubtitles); it is
 // loaded by a plain <script> in index.html and read lazily here.
 const MS = () => { const m = window.MatroskaSubtitles; if (!m) throw new Error("matroska-subtitles not loaded"); return m; };
-const PARK_WINDOW = 16 * 1024 * 1024;   // <= ByteSource prefetch depth; beyond this a gap is a seek
+const PARK_WINDOW = 16 * 1024 * 1024;   // a nearer gap fills in shortly; beyond this it is a seek
+export const HEADER_MAX_BYTES = 128 * 1024 * 1024;   // fonts can run to tens of MB; same cap as the TV's own header read
 const ASS_DEBUG = new URLSearchParams(location.search).has("assdebug");
 if (typeof window !== "undefined") window.__JASSUB = JASSUB;   // for in-browser diagnostics
 
@@ -89,11 +90,16 @@ export class SubtitleDemux {
   _emitCue(n, s) { queueMicrotask(() => { try { this.onCue?.(n, s); } catch (e) { this.stats.consumerErrors = (this.stats.consumerErrors || 0) + 1; this.stats.lastConsumerError = `${e?.message || e}`; } }); }
 
   get headerDone() { return this.firstCluster != null && this.headerCursor >= this.firstCluster; }
+  // Nothing more to read before playback: the header is in, or the file is not Matroska.
+  get settled() { return this.foreign || this.headerDone; }
 
   // Chunks are fetched concurrently, so they can arrive out of order. Anything within
   // one prefetch window ahead of the cursor is parked until the gap fills; anything
   // farther is a real jump (playback start / TV seek) and resyncs the stream there.
   write(offset, bytes) {
+    // An MP4 has no Matroska header to find; its bytes would only confuse the parser.
+    if (offset === 0 && this.headerCursor === 0) this.foreign = !(bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3);
+    if (this.foreign) return;
     this._accept(offset, bytes);
     // drain parked chunks that now continue the cursor
     for (;;) {
@@ -108,7 +114,9 @@ export class SubtitleDemux {
   _accept(offset, bytes) {
     const end = offset + bytes.byteLength;
     if (!this.headerDone) {
-      if (offset > this.headerCursor) { if (offset - this.headerCursor <= PARK_WINDOW) { this.pending.set(offset, bytes); this.stats.parked++; } else this.stats.dropped++; return; }
+      // A header chunk that arrives early waits for the gap before it to fill, however wide.
+      // Chunks from past the largest header (the Cues at the tail, the play position) are not header.
+      if (offset > this.headerCursor) { if (offset < HEADER_MAX_BYTES) { this.pending.set(offset, bytes); this.stats.parked++; } else this.stats.dropped++; return; }
       if (end <= this.headerCursor) return;
       const slice = bytes.subarray(this.headerCursor - offset);
       if (this.firstCluster == null) { const idx = findClusterId(slice); if (idx >= 0) this.firstCluster = this.headerCursor + idx; }
