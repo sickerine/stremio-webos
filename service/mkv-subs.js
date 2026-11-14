@@ -60,6 +60,8 @@ function reconstruct(data, startS, endS) {
     return 'Dialogue: ' + layer + ',' + fmtTs(startS) + ',' + fmtTs(endS) + ',' + style + ',' + name + ',' + ml + ',' + mr + ',' + mv + ',' + eff + ',' + text;
 }
 
+var MAX_LEAF_BYTES = 64 * 1024 * 1024;
+
 function MkvSubDemux(cb) {
     this.cb = cb || {};
     this.buf = Buffer.alloc(0);
@@ -203,13 +205,20 @@ MkvSubDemux.prototype._block = function (data, durTicks) {
 // a gap (seek) triggers a resync to the next Cluster boundary. The header
 // (Tracks/CodecPrivate/attachments) is parsed from the initial offset-0 range.
 MkvSubDemux.prototype.pushAt = function (offset, buf) {
-    if (this._sPending && offset === this._sAbs + this._sPending.length) {
-        this._sPending = Buffer.concat([this._sPending, buf]);       // contiguous
+    if (this._sPending && offset === this._sAbs + this._sPending.length + this._sHeldLen) {   // contiguous
+        // A leaf bigger than a chunk (an 18 MB attached font) is waited for. Joining on
+        // every chunk re-copied the whole wait each time: 10 GB of copying for that
+        // font, which blocked the service on the TV for about 50 s. Hold the chunks
+        // until the leaf is complete and join once.
+        this._sHeld.push(buf); this._sHeldLen += buf.length;
+        if (this._sPending.length + this._sHeldLen < this._sWant) return;
+        this._sPending = Buffer.concat([this._sPending].concat(this._sHeld));
     } else {
         this._sPending = Buffer.from(buf); this._sAbs = offset; this._sPos = offset; // (re)start
         this._stack = offset === 0 ? [] : [{ id: IDS.SEGMENT, end: Infinity }];
         if (offset !== 0) this._needResync = true;                    // jumped mid-file
     }
+    this._sHeld = []; this._sHeldLen = 0; this._sWant = 0;
     this._parseStream();
 };
 // Find the next real Cluster start. The bare 4-byte ID (0x1F43B675) occurs by
@@ -261,7 +270,8 @@ MkvSubDemux.prototype._parseStream = function () {
         if ((idr.id === IDS.SIMPLEBLOCK || idr.id === IDS.BLOCK) && this._canPeekTrack(dsLocal)) {
             if (!this._blockIsSub(this._sPending, dsLocal)) { this._sPos = deAbs; continue; }
         }
-        if (deAbs - this._sAbs > this._sPending.length) break;        // wait for full leaf data
+        if (szr.value > MAX_LEAF_BYTES) { this._sPos = deAbs; continue; }   // nothing we extract is this big; never buffer it
+        if (deAbs - this._sAbs > this._sPending.length) { this._sWant = deAbs - this._sAbs; break; }   // wait for full leaf data
         this._leaf(idr.id, this._sPending, dsLocal, deAbs - this._sAbs);
         this._sPos = deAbs;
     }
