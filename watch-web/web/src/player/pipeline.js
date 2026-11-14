@@ -235,7 +235,8 @@ export class Pipeline {
         const rate = fed > 4 ? (this.source.bytesFetched - bytes0) / fed : 0;   // bytes per media second
         const { aheadSeconds, aheadBytes } = this.bufferPolicy;
         const limit = Math.max(4, rate > 0 ? Math.min(aheadSeconds, aheadBytes / rate) : aheadSeconds);
-        if (lastTs - this.video.currentTime < limit) return;
+        run.throttled = lastTs - this.video.currentTime >= limit;   // main.js: a throttled mux never reaches a target ahead of it
+        if (!run.throttled) return;
         await new Promise(r => setTimeout(r, 250));
       }
     };

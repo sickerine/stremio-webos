@@ -5,7 +5,7 @@ import { SubtitleDemux, AssRenderer } from "./subtitles/ass.js";
 import { BitmapDemux } from "./subtitles/bitmap-demux.js";
 import { BitmapRenderer } from "./subtitles/bitmap.js";
 import { TextSubtitles } from "./subtitles/text.js";
-import { estimateTvPosition, syncAction } from "./sync.js";
+import { estimateTvPosition, syncAction, feedWillReach } from "./sync.js";
 
 const room = new URLSearchParams(location.search).get("room") || "home";
 const ui = buildUi(document.getElementById("app"));
@@ -20,7 +20,10 @@ let audioUnlocked = false;
 let seeking = false;
 let lastRemuxAt = 0;
 const REMUX_COOLDOWN_MS = 5000;   // min gap between cold re-muxes while catching up
-const FEED_WAIT_S = 20;           // if the running mux is within this much media of the target, wait for it instead of restarting
+let lastJumpAt = 0;
+const JUMP_COOLDOWN_MS = 10000;   // min gap between jumps that only correct drift, so a slow seek can't loop
+let offSince = 0;                 // when this browser started waiting on a seek it could not make yet
+const STUCK_MS = 15000;           // never wait longer than this for the mux; restart it at the TV's position
 
 const prefs = { audio: localStorage.getItem("watch.audio") || "", subs: localStorage.getItem("watch.subs") || "eng" };
 
@@ -193,17 +196,18 @@ async function follow() {
   // HAVE_METADATA can mean the current frame was lost to a buffer gap. Seeking
   // to a buffered TV position is what restores it; do not gate recovery on a frame.
 
+  const buffered = s.pipeline.isBuffered(target);
   const act = syncAction(video.currentTime, target, { paused: hold, snap: Boolean(correction), playbackRate,
-    rateCorrection: s.pipeline.MediaSource !== globalThis.ManagedMediaSource });
+    rateCorrection: s.pipeline.MediaSource !== globalThis.ManagedMediaSource,
+    nudging: video.playbackRate !== playbackRate, buffered: buffered && Date.now() - lastJumpAt > JUMP_COOLDOWN_MS });
   if (act.type === "seek") {
     // If the target is already buffered, jump instantly. Otherwise a hard seek means
     // re-muxing from there, which clears the buffer; don't do that again until the
     // mux has had a few seconds to build toward the last target, or the browser will
     // restart forever while the TV keeps moving ahead of a cold buffer.
-    const run = s.pipeline.run;
-    const feedIsClose = run && !run.cancelled && run.fedTs != null && target >= run.startAt &&
-      target >= run.fedTs && target - run.fedTs < FEED_WAIT_S;
-    if (s.pipeline.isBuffered(target)) {
+    if (buffered) {
+      offSince = 0;
+      if (!correction) lastJumpAt = Date.now();
       seeking = true;
       syncStats.seeks++;
       try {
@@ -211,7 +215,7 @@ async function follow() {
         await s.pipeline.seekTo(landing());
         // At most one completion correction per event. Never turn this into a
         // steady-playback seek loop. An intervening TV event supersedes this one.
-        if (session === s && pendingCorrection === correction && tvState?.sessionId === s.id &&
+        if (correction && session === s && pendingCorrection === correction && tvState?.sessionId === s.id &&
             !tvState.paused && !tvState.buffering &&
             Math.abs(video.currentTime - estimateTvPosition(tvState)) > 0.12 && s.pipeline.isBuffered(landing())) {
           syncStats.seeks++;
@@ -220,10 +224,11 @@ async function follow() {
         if (pendingCorrection === correction) pendingCorrection = null;
       } finally { seeking = false; }
       setPlaybackRate(playbackRate);
-    } else if (feedIsClose) {
+    } else if ((offSince ||= Date.now()) && feedWillReach(s.pipeline.run, target) && Date.now() - offSince < STUCK_MS) {
       setPlaybackRate(playbackRate);                          // the running mux reaches the target in a moment; restarting would only add a cold start
     } else if (Date.now() - lastRemuxAt > REMUX_COOLDOWN_MS) {
       lastRemuxAt = Date.now();
+      offSince = 0;
       seeking = true;
       try {
         syncStats.remuxes++;
@@ -238,7 +243,7 @@ async function follow() {
       // waiting for the in-flight re-mux to reach the target; nudge toward it
       setPlaybackRate(playbackRate);
     }
-  } else { setPlaybackRate(act.playbackRate); if (pendingCorrection === correction) pendingCorrection = null; }
+  } else { offSince = 0; setPlaybackRate(act.playbackRate); if (pendingCorrection === correction) pendingCorrection = null; }
 
   if (video.readyState >= (hold ? 2 : 3) && !ui.el.overlay.hidden && Math.abs(video.currentTime - target) < 2) { ui.setStage("done"); ui.overlay(false); }
   else if (video.readyState < 3 && s.pipeline.isBuffered(target) === false && ui.el.overlay.hidden) { /* stalled; leave player visible */ }

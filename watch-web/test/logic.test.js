@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateTvPosition, syncAction, isBuffered } from "../web/src/sync.js";
+import { estimateTvPosition, syncAction, isBuffered, feedWillReach } from "../web/src/sync.js";
 import { bestOffset } from "../shared/clock.js";
 import { normalizeState, resolveRedirects, createRelayServer } from "../server/server.js";
 import { WebSocket } from "ws";
@@ -14,8 +14,15 @@ test("TV position estimate advances only while playing and not buffering", () =>
 });
 
 test("sync policy: dead band, rate nudge, hard seek", () => {
-  assert.equal(syncAction(100, 100.2).type, "none");
+  assert.equal(syncAction(100, 100.03).type, "none");
+  assert.equal(syncAction(100, 100.2).type, "rate");
+  // a correction that has started runs until the browser is close, not just back inside the outer band
+  assert.equal(syncAction(100, 100.03, { nudging: true }).type, "rate");
+  assert.equal(syncAction(100, 100.01, { nudging: true }).type, "none");
+  assert.equal(syncAction(100, 100.4, { buffered: true }).type, "rate");
   assert.equal(syncAction(100, 101.5).type, "rate");
+  assert.equal(syncAction(100, 101.5, { buffered: true }).type, "seek");   // a jump inside the buffer is free
+  assert.equal(syncAction(100, 101.5, { rateCorrection: false }).type, "none");
   assert.equal(syncAction(100, 104).type, "seek");
   // paused or just-jumped: land on the frame, don't nudge
   assert.equal(syncAction(100, 100.2, { paused: true }).type, "seek");
@@ -28,6 +35,13 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
   assert.equal(bestOffset([]), null);
   assert.ok(isBuffered([[90, 120]], 100));
   assert.ok(!isBuffered([[90, 120]], 130));
+});
+
+test("a mux held to its lead is not waited for: the TV's skip would never be followed", () => {
+  const run = { cancelled: false, startAt: 20, fedTs: 112 };
+  assert.equal(feedWillReach(run, 122), true);                           // feeding freely, 10 s short: wait
+  assert.equal(feedWillReach({ ...run, throttled: true }, 122), false);  // held 90 s ahead of the playhead: restart
+  assert.equal(feedWillReach(run, 140), false);                          // too far: restart
 });
 
 test("relay rejects garbage state and keeps only http(s) media urls", () => {
