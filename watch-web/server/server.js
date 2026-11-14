@@ -68,14 +68,15 @@ function headRequest(url) {
 
 // Optional password gate (WATCH_PASSWORD). One shared password, no usernames; a correct
 // POST /login sets a long-lived cookie that every page, API and viewer socket checks.
-// /health stays open (docker healthcheck) and so does the TV's own socket, which has no
-// way to log in; it can only publish playback state.
+// /health stays open (docker healthcheck). The TV has no way to log in, so its socket is
+// checked against TV_KEY, which the TV sends as ?key= in the relay URL stored on it.
 const COOKIE = "watch_auth";
 const digest = s => createHash("sha256").update(s).digest();
-export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST, staleMs = 6000, password = process.env.WATCH_PASSWORD || "" } = {}) {
+export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST, staleMs = 6000, password = process.env.WATCH_PASSWORD || "", tvKey = process.env.TV_KEY || "" } = {}) {
   const token = password ? digest(`watch-web cookie:${password}`).toString("hex") : null;
   const authed = req => !token || (req.headers.cookie || "").split(/;\s*/).includes(`${COOKIE}=${token}`);
   const passwordOk = given => typeof given === "string" && timingSafeEqual(digest(given), digest(password));
+  const tvKeyOk = given => !tvKey || (typeof given === "string" && timingSafeEqual(digest(given), digest(tvKey)));
   const safeNext = n => (typeof n === "string" && /^\/(?!\/)/.test(n) ? n : "/");
   const rooms = new Map();
   const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null }); return rooms.get(id); };
@@ -148,7 +149,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
     if (url.pathname !== "/ws" || !/^[a-z0-9_-]{1,64}$/i.test(roomId) || !["tv", "viewer"].includes(role)) {
       socket.write("HTTP/1.1 400 Bad Request\r\n\r\n"); socket.destroy(); return;
     }
-    if (role !== "tv" && !authed(req)) { socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n"); socket.destroy(); return; }
+    if (role === "tv" ? !tvKeyOk(url.searchParams.get("key")) : !authed(req)) { socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n"); socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, ws => wss.emit("connection", ws, { roomId, role }));
   });
 

@@ -1,12 +1,12 @@
 // Pretend to be the TV bridge. Usage:
-//   URL=<torrentio-or-cdn-url> POS=250 [PAUSED=1] [PORT=3211] [CMD=/tmp/ww-tv-cmd] node scripts/tv-sim.mjs
+//   URL=<torrentio-or-cdn-url> POS=250 [PAUSED=1] [PORT=3211] [KEY=<TV_KEY>] [CMD=/tmp/ww-tv-cmd] node scripts/tv-sim.mjs
 // Commands: append a line to the CMD file (default /tmp/ww-tv-cmd); it is read and truncated every 300ms:
 //   pause | play | stall | resume | seek <sec> | idle | url <newUrl> [pos]   (stall = 'playing' but position frozen, like a loading TV)
 import { WebSocket } from "ws";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 const port = process.env.PORT || 3211, cmdFile = process.env.CMD || "/tmp/ww-tv-cmd", room = process.env.ROOM || "home";
 let url = process.env.URL, pos = Number(process.env.POS || 0), paused = process.env.PAUSED === "1", stalled = process.env.STALLED === "1", seq = 0, session = Date.now().toString(36);
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv&room=${room}`);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?role=tv&room=${room}${process.env.KEY ? `&key=${encodeURIComponent(process.env.KEY)}` : ""}`);
 const state = () => ({ type: "state", state: { sessionId: `sim-${session}`, sequence: ++seq, positionSeconds: pos, paused, playbackRate: 1, buffering: false, mediaUrl: url, title: process.env.TITLE || "tv-sim", episodeId: "sim" } });
 const send = () => ws.send(JSON.stringify(state()));
 ws.on("open", () => {

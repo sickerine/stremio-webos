@@ -13,6 +13,8 @@ services:
       ISOLATE: ${ISOLATE:-0}
       # Shared password for the site (set in .env). Empty = no login.
       WATCH_PASSWORD: ${WATCH_PASSWORD:-}
+      # Key the TV must send as ?key= in its relay URL (set in .env). Empty = any client may act as the TV.
+      TV_KEY: ${TV_KEY:-}
     cpus: 0.5
     mem_limit: 256m
     healthcheck:
