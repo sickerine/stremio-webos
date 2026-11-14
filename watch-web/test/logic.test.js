@@ -37,11 +37,30 @@ test("sync policy: dead band, rate nudge, hard seek", () => {
   assert.ok(!isBuffered([[90, 120]], 130));
 });
 
+test("rate correction settles without flipping direction, however late the loop runs", () => {
+  for (const [tickSeconds, tvRate] of [[0.25, 1], [0.5, 1], [1, 1], [2, 1], [2, 2]]) {
+    let gap = 0.045, rate = tvRate, flips = 0, lastDirection = 0;
+    for (let t = 0; t < 30; t += tickSeconds) {
+      const act = syncAction(0, gap, { playbackRate: tvRate, nudging: rate !== tvRate });
+      const next = act.type === "rate" ? act.playbackRate : tvRate;
+      const direction = Math.sign(next - tvRate);
+      if (direction && lastDirection && direction !== lastDirection) flips++;
+      if (direction) lastDirection = direction;
+      rate = next; gap -= (rate - tvRate) * tickSeconds;
+    }
+    assert.equal(flips, 0, `ticks every ${tickSeconds} s at ${tvRate}x`);
+    assert.ok(Math.abs(gap) <= 0.04, `ticks every ${tickSeconds} s at ${tvRate}x end ${Math.round(gap * 1000)} ms off`);
+  }
+});
+
 test("a mux held to its lead is not waited for: the TV's skip would never be followed", () => {
   const run = { cancelled: false, startAt: 20, fedTs: 112 };
   assert.equal(feedWillReach(run, 122), true);                           // feeding freely, 10 s short: wait
   assert.equal(feedWillReach({ ...run, throttled: true }, 122), false);  // held 90 s ahead of the playhead: restart
   assert.equal(feedWillReach(run, 140), false);                          // too far: restart
+  // just restarted and still fetching its first data: restarting again would never let a slow connection start
+  assert.equal(feedWillReach({ cancelled: false, startAt: 118 }, 124), true);
+  assert.equal(feedWillReach({ cancelled: false, startAt: 118 }, 150), false);
 });
 
 test("relay rejects garbage state and keeps only http(s) media urls", () => {
@@ -148,7 +167,7 @@ test("TV capture time survives both network hops and different clocks for every 
     assert.equal(estimateTvPosition(local, capturedAt + viewerOffset + transit), paused || buffering ? 42 : 43.5, event);
   }
   assert.equal(normalizeState({ sessionId: "s", sequence: 1, positionSeconds: 1 }), null, "arrival time must not silently replace a missing capture time");
-  assert.equal(syncAction(41, 42, { playbackRate: 2 }).playbackRate, 2.12);
+  assert.equal(syncAction(41, 42, { playbackRate: 2 }).playbackRate, 2.06);   // the correction is a rate difference, not a share of the TV speed
   assert.equal(syncAction(41.6, 42, { snap: true }).type, "seek");
   assert.equal(syncAction(41.6, 42).type, "rate", "subsequent heartbeats nudge instead of repeating the event seek");
 });

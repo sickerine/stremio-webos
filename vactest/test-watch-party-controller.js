@@ -152,5 +152,10 @@ assert.strictEqual(fresh.positionSeconds, 20);
 assert.strictEqual(fresh.sampledAtMs, nowMs - 150 - 8, 'timestamp of the change, between the two frames around it');
 nowMs += 400;
 assert.strictEqual(sandbox.window.__watchParty.state().sampledAtMs, nowMs, 'no change for half a second: stalled, so read as of now');
+// A seek sets currentTime before playback resumes there: that value is not advancing yet.
+video.currentTime = 300; nowMs += 120; video.emit('seeked');
+nowMs += 16; frames.shift()();   // the frame loop sees 300 for the first time only now
+nowMs += 100;
+assert.strictEqual(sandbox.window.__watchParty.state().sampledAtMs, nowMs, 'after a seek the position is read as of now until it moves again');
 
 console.log('watch-party controller tests passed');

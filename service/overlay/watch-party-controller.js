@@ -134,6 +134,10 @@
 
     function playerEvent(name) {
         return function () {
+            // The value on screen predates this event and may not be advancing yet:
+            // not exact until it changes again.
+            clockValue = video ? video.currentTime : -1;
+            clockAt = 0;
             if (name === 'waiting') buffering = true;
             if (name === 'playing' || name === 'seeked') buffering = false;
             publish(name);
