@@ -102,6 +102,8 @@ function plausible(item, durationMs) {
     if (length < 5000) return false;
     if (item.type === 'intro' && length > 200000) return false;
     if (item.type === 'outro' && length > 600000) return false;
+    // Opening titles filed under credits are not end credits.
+    if (item.type === 'outro' && item.from < durationMs / 2) return false;
     if (item.episodeLength != null) {
         var tolerance = Math.max(120000, durationMs * 0.05);
         if (Math.abs(item.episodeLength - durationMs) > tolerance) return false;
@@ -129,12 +131,12 @@ function strongestOutroCluster(items) {
     return [items.slice().sort(function (left, right) { return left.from - right.from; })[0]];
 }
 
-// Sources that disagree on where an intro ends may be timing different cuts of the
-// episode. The stretch every one of them calls intro is still safe to skip.
-function sharedIntro(items) {
+// Sources that disagree on a segment's boundaries may be timing different cuts of the
+// episode. The stretch every one of them puts inside it is still safe to skip.
+function sharedSegment(items, durationMs) {
     if (items.length < 2) return null;
     var from = Math.max.apply(Math, items.map(function (item) { return item.from; }));
-    var to = Math.min.apply(Math, items.map(function (item) { return item.to; }));
+    var to = Math.min.apply(Math, items.map(function (item) { return item.to == null ? durationMs : item.to; }));
     return to - from >= 5000 ? { from: from, to: to } : null;
 }
 
@@ -150,13 +152,13 @@ function reconcile(items, durationMs) {
         intro: introCluster.length ? {
             from: Math.min.apply(Math, introCluster.map(function (item) { return item.from; })),
             to: Math.max.apply(Math, introCluster.map(function (item) { return item.to; })),
-        } : sharedIntro(intros),
+        } : sharedSegment(intros, durationMs),
         outro: outroCluster.length ? {
             from: Math.min.apply(Math, outroCluster.map(function (item) { return item.from; })),
             to: Math.min.apply(Math, outroCluster.map(function (item) {
                 return item.to == null ? durationMs : item.to;
             })),
-        } : null,
+        } : sharedSegment(outros, durationMs),
     };
 }
 

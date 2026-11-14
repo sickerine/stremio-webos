@@ -58,6 +58,21 @@ test('when intro endpoints disagree, only the stretch every source calls intro i
     ], 1440000).intro, null);
 });
 
+test('when sources disagree on where the credits start, the stretch both call credits is the outro', () => {
+    // Iron Fist 1x07: IntroDB and TheIntroDB differ by a minute, and TheIntroDB also files
+    // the opening titles under credits.
+    assert.deepEqual(Skip.reconcile([
+        { type: 'outro', from: 3453360, to: 3516640, source: 'introdb' },
+        { type: 'outro', from: 354000, to: 422000, source: 'theintrodb' },
+        { type: 'outro', from: 3392518, to: null, source: 'theintrodb' },
+    ], 3520160).outro, { from: 3453360, to: 3516640 });
+
+    // Credits in the first half of an episode are not end credits, even alone.
+    assert.equal(Skip.reconcile([
+        { type: 'outro', from: 354000, to: 422000, source: 'theintrodb' },
+    ], 3520160).outro, null);
+});
+
 test('accepts a plausible named exact-file chapter or a duration-matched API result alone', () => {
     assert.deepEqual(Skip.reconcile([
         { type: 'intro', from: 11000, to: 91000, source: 'chapter' },
