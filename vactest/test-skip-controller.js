@@ -180,3 +180,76 @@ test('skip suppression survives duplicate loads but resets for a different episo
     await controller.load({ id: 'kitsu:1:2', durationMs: 1000000 }, () => {});
     assert.equal(controller.visibleType(83000, { intro: { from: 62000, to: 152000 } }, true), 'intro');
 });
+
+test('alone on screen the skip action lets go of the remote after ten seconds; with the controls open it stays', () => {
+    const controller = createController({
+        getMedia: () => null,
+        fetch: async () => response(null),
+        delay: async () => {},
+    });
+    const data = { intro: { from: 0, to: 90000 }, outro: null };
+
+    assert.equal(controller.visibleType(1000, data, true, false, 0), 'intro');
+    assert.equal(controller.visibleType(9000, data, true, false, 9999), 'intro');
+    assert.equal(controller.visibleType(10000, data, true, false, 10000), null);
+    assert.equal(controller.visibleType(40000, data, true, true, 40000), 'intro');    // player view open
+    assert.equal(controller.visibleType(41000, data, true, false, 41000), null);
+    // Rewinding into the intro after it ended starts over.
+    assert.equal(controller.visibleType(95000, data, true, false, 95000), null);
+    assert.equal(controller.visibleType(5000, data, true, false, 100000), 'intro');
+});
+
+test('Back and Down dismiss the floating skip action; Left, Up and Right open the controls', () => {
+    const controller = createController({
+        getMedia: () => null,
+        fetch: async () => response(null),
+        delay: async () => {},
+    });
+    const data = { intro: { from: 0, to: 90000 }, outro: null };
+
+    assert.deepEqual([461, 40].map(controller.floatingKey), ['dismiss', 'dismiss']);
+    assert.deepEqual([37, 38, 39].map(controller.floatingKey), ['controls', 'controls', 'controls']);
+    assert.equal(controller.floatingKey(13), null);                                   // OK belongs to the action
+
+    assert.equal(controller.visibleType(1000, data, true, false, 0), 'intro');
+    controller.dismiss('intro', data);
+    assert.equal(controller.visibleType(2000, data, true, false, 1000), null);
+    assert.equal(controller.visibleType(3000, data, true, true, 2000), 'intro');      // still there in the player view
+});
+
+test('an IMDb episode gets skip data too', async () => {
+    let requested;
+    const controller = createController({
+        getMedia: () => ({ url: 'https://cdn.example/dexter.mkv' }),
+        fetch: async url => { requested = url; return response({ intro: { from: 1000, to: 21586 }, outro: null }); },
+        delay: async () => {},
+    });
+
+    assert.deepEqual(await controller.load({ id: 'tt0773262:1:1', durationMs: 3190000 }, () => {}),
+        { intro: { from: 1000, to: 21586 }, outro: null });
+    assert.match(requested, /id=tt0773262%3A1%3A1/);
+});
+
+test('a paused player still lets go: the floating skip action reports when its ten seconds are up', t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const controller = createController({
+        getMedia: () => null,
+        fetch: async () => response(null),
+        delay: async () => {},
+    });
+    const data = { intro: { from: 0, to: 90000 }, outro: null };
+    let ended = 0;
+
+    assert.equal(controller.visibleType(1000, data, true, false, 0, () => ended++), 'intro');
+    t.mock.timers.tick(9999);
+    assert.equal(ended, 0);
+    t.mock.timers.tick(1);
+    assert.equal(ended, 1);
+
+    // Opening the player view first cancels it.
+    assert.equal(controller.visibleType(95000, data, true, false, 20000), null);
+    assert.equal(controller.visibleType(1000, data, true, false, 30000, () => ended++), 'intro');
+    assert.equal(controller.visibleType(2000, data, true, true, 31000, () => ended++), 'intro');
+    t.mock.timers.tick(20000);
+    assert.equal(ended, 1);
+});

@@ -417,8 +417,8 @@ var proxyServer = http.createServer(function(req, res) {
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-cache');
-        if (!/^kitsu:\d+:\d+$/.test(skq.id || '') || !/^https?:\/\//.test(skq.u || '') ||
-            !isFinite(durationMs) || durationMs <= 0) {
+        // The resolver decides which ids it supports.
+        if (!/^https?:\/\//.test(skq.u || '') || !isFinite(durationMs) || durationMs <= 0) {
             res.writeHead(400); return res.end('{"intro":null,"outro":null}');
         }
         skipResolver.resolve({ id: skq.id, mediaUrl: skq.u, durationMs: durationMs }).then(function (result) {

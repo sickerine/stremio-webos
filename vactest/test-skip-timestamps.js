@@ -39,13 +39,23 @@ test('keeps the skip button available across differing starts when the end agree
     assert.deepEqual(result.intro, { from: 102667, to: 193792 });
 });
 
-test('fails closed when independent intro endpoints disagree', () => {
-    const result = Skip.reconcile([
+test('when intro endpoints disagree, only the stretch every source calls intro is skipped', () => {
+    assert.deepEqual(Skip.reconcile([
         { type: 'intro', from: 60000, to: 150000, source: 'chapter' },
         { type: 'intro', from: 60000, to: 180000, source: 'aniskip' },
-    ], 1440000);
+    ], 1440000).intro, { from: 60000, to: 150000 });
 
-    assert.equal(result.intro, null);
+    // Dexter 1x01: IntroDB and TheIntroDB differ by 6 s.
+    assert.deepEqual(Skip.reconcile([
+        { type: 'intro', from: 1000, to: 28000, source: 'introdb' },
+        { type: 'intro', from: 0, to: 21586, source: 'theintrodb' },
+    ], 3190000).intro, { from: 1000, to: 21586 });
+
+    // Timings of different parts of the episode share nothing: no button.
+    assert.equal(Skip.reconcile([
+        { type: 'intro', from: 0, to: 90000, source: 'introdb' },
+        { type: 'intro', from: 300000, to: 390000, source: 'theintrodb' },
+    ], 1440000).intro, null);
 });
 
 test('accepts a plausible named exact-file chapter or a duration-matched API result alone', () => {
@@ -175,4 +185,24 @@ test('negative results expire quickly and a synchronous chapter-probe failure fa
     time += 6 * 60 * 1000;
     assert.deepEqual(await resolver.resolve(input), { intro: null, outro: null });
     assert.equal(identityCalls, 2);
+});
+
+test('an IMDb episode is looked up directly, without the anime identity service', async () => {
+    const requested = [];
+    const resolver = Skip.createResolver({
+        identity: { resolveIdentity: async () => { throw new Error('not an anime id'); } },
+        chapters: async () => [],
+        requestJson: async request => {
+            requested.push(request.hostname + request.path);
+            return request.hostname === 'api.introdb.app' ? { intro: { start_ms: 1000, end_ms: 28000 } } : {};
+        },
+    });
+
+    assert.deepEqual(await resolver.resolve({
+        id: 'tt0773262:1:1',
+        mediaUrl: 'https://cdn.example/dexter.mkv',
+        durationMs: 3190000,
+    }), { intro: { from: 1000, to: 28000 }, outro: null });
+    assert.ok(requested.some(x => x.startsWith('api.introdb.app/segments?imdb_id=tt0773262&season=1&episode=1')));
+    assert.ok(!requested.some(x => x.startsWith('api.aniskip.com')));
 });

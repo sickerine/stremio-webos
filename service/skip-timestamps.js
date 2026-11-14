@@ -129,6 +129,15 @@ function strongestOutroCluster(items) {
     return [items.slice().sort(function (left, right) { return left.from - right.from; })[0]];
 }
 
+// Sources that disagree on where an intro ends may be timing different cuts of the
+// episode. The stretch every one of them calls intro is still safe to skip.
+function sharedIntro(items) {
+    if (items.length < 2) return null;
+    var from = Math.max.apply(Math, items.map(function (item) { return item.from; }));
+    var to = Math.min.apply(Math, items.map(function (item) { return item.to; }));
+    return to - from >= 5000 ? { from: from, to: to } : null;
+}
+
 function reconcile(items, durationMs) {
     durationMs = Number(durationMs);
     if (!isFinite(durationMs) || durationMs <= 0) return { intro: null, outro: null };
@@ -141,7 +150,7 @@ function reconcile(items, durationMs) {
         intro: introCluster.length ? {
             from: Math.min.apply(Math, introCluster.map(function (item) { return item.from; })),
             to: Math.max.apply(Math, introCluster.map(function (item) { return item.to; })),
-        } : null,
+        } : sharedIntro(intros),
         outro: outroCluster.length ? {
             from: Math.min.apply(Math, outroCluster.map(function (item) { return item.from; })),
             to: Math.min.apply(Math, outroCluster.map(function (item) {
@@ -194,7 +203,7 @@ function createResolver(options) {
 
     function resolve(input) {
         input = input || {};
-        if (!/^kitsu:\d+:\d+$/.test(input.id || '') || !/^https?:\/\//.test(input.mediaUrl || '') ||
+        if (!/^(?:kitsu:\d+|tt\d+:\d+):\d+$/.test(input.id || '') || !/^https?:\/\//.test(input.mediaUrl || '') ||
             !isFinite(Number(input.durationMs)) || Number(input.durationMs) <= 0)
             return Promise.resolve({ intro: null, outro: null });
         var cacheKey = input.id + '|' + input.mediaUrl + '|' + Math.round(Number(input.durationMs) / 1000);
@@ -203,7 +212,11 @@ function createResolver(options) {
         var chapterPromise = safe(Promise.resolve().then(function () {
             return options.chapters(input.mediaUrl);
         })).then(fromChapters);
-        var value = options.identity.resolveIdentity(input.id).then(function (identity) {
+        // An IMDb episode id is already what the intro databases are keyed by.
+        var identity = /^tt/.test(input.id)
+            ? Promise.resolve({ aliases: [{ id: input.id }] })
+            : options.identity.resolveIdentity(input.id);
+        var value = identity.then(function (identity) {
             var providers = (identity.aliases || []).map(function (alias) {
                 return fetchAlias(alias, Number(input.durationMs));
             });
