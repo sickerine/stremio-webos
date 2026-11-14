@@ -17,13 +17,14 @@
   "type": "module",
   "private": "true",
   "dependencies": {
-    "@mediabunny/ac3": "^1.55.6",
-    "@mediabunny/dts": "^1.55.6",
+    "@mediabunny/ac3": "^1.66.0",
+    "@mediabunny/dts": "^1.66.0",
+    "@mediabunny/truehd": "^1.66.0",
     "jassub": "^2.5.14",
     "libbitsub": "^1.12.1",
     "matroska-subtitles": "^3.3.2",
     "media-chrome": "^4.19.2",
-    "mediabunny": "^1.55.6",
+    "mediabunny": "^1.66.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {

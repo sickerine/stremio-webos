@@ -1,6 +1,6 @@
 // End-to-end check of the watch page in a real browser, with no TV and no CDN: ffmpeg
-// makes two short files (stereo AAC, copied as is, and 5.1 Dolby, converted in the
-// browser), a relay and a fake TV run in this process, and Chromium has to follow them.
+// makes three short files (stereo AAC, copied as is; 5.1 Dolby and 5.1 TrueHD, converted
+// in the browser), a relay and a fake TV run in this process, and Chromium has to follow them.
 // Needs a build (`npm run build`) and ffmpeg.   Usage: node scripts/pw-e2e.mjs
 //   CHROME=<path>  use this browser binary instead of Playwright's own
 import http from "node:http";
@@ -17,7 +17,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const dir = mkdtempSync(path.join(tmpdir(), "watch-e2e-"));
 const video = ["-f", "lavfi", "-i", "testsrc2=s=1280x720:r=24", "-f", "lavfi", "-i", "sine=f=440:r=48000", "-t", "120",
   "-c:v", "libx264", "-preset", "ultrafast", "-g", "48", "-pix_fmt", "yuv420p"];
-const files = { "aac.mkv": ["-c:a", "aac", "-ac", "2"], "dolby.mkv": ["-c:a", "ac3", "-ac", "6"] };
+const files = { "aac.mkv": ["-c:a", "aac", "-ac", "2"], "dolby.mkv": ["-c:a", "ac3", "-ac", "6"], "truehd.mkv": ["-c:a", "truehd", "-strict", "-2", "-ac", "6"] };
 for (const [name, audio] of Object.entries(files)) execFileSync("ffmpeg", ["-v", "error", "-y", ...video, ...audio, path.join(dir, name)]);
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Range", "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges" };

@@ -35,7 +35,7 @@ function trackParts(lang, name) {
   const n = (name || "").trim();
   return { label: l, detail: n && n.toLowerCase() !== l.toLowerCase() ? n : "" };
 }
-const CODEC_NAMES = { aac: "AAC", ac3: "Dolby", eac3: "Dolby", dts: "DTS", flac: "FLAC", opus: "Opus", mp3: "MP3" };
+const CODEC_NAMES = { aac: "AAC", ac3: "Dolby", eac3: "Dolby", truehd: "Dolby TrueHD", dts: "DTS", flac: "FLAC", opus: "Opus", mp3: "MP3" };
 function codecName(c) { return CODEC_NAMES[c] || String(c || "").toUpperCase(); }
 function fmtLang(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch { return code || "und"; } }
 

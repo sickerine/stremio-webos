@@ -11,18 +11,20 @@ import {
 import { downmixToStereo } from "./downmix.js";
 import { registerAc3Decoder } from "@mediabunny/ac3";
 import { registerDtsDecoder } from "@mediabunny/dts";
+import { registerTrueHdDecoder } from "@mediabunny/truehd";
 import { presentedFrame, seekLead } from "./presentation.js";
 import { ByteSource } from "../net/byte-source.js";
 
 registerAc3Decoder();   // AC-3 + E-AC-3
 registerDtsDecoder();   // DTS (incl. DTS-HD core)
+registerTrueHdDecoder();   // Dolby TrueHD (incl. the bed under Atmos)
 
 const DESKTOP_BUFFER = { aheadSeconds: 90, aheadBytes: 120 * 1024 * 1024, behindSeconds: 45 };
 // Leave memory for 4K decoding on phones; the raw file cache and MSE buffer
 // coexist. Cap response size too, independently of fetch reader backpressure.
 const MANAGED_BUFFER = { ...DESKTOP_BUFFER, aheadSeconds: 15, aheadBytes: 24 * 1024 * 1024,
   maxCachedChunks: 4, prefetchAhead: 1, rangeBytes: 32 * 1024 * 1024 };
-const TRANSCODABLE = new Set(["ac3", "eac3", "dts"]);
+const TRANSCODABLE = new Set(["ac3", "eac3", "dts", "truehd"]);
 const AUDIO_BITRATE = 256_000;
 const AUDIO_LEAD_IN = 0.04;   // seconds: longer than one AAC (21 ms) or Dolby (32 ms) packet
 
