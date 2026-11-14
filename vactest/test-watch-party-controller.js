@@ -45,8 +45,11 @@ const storage = {
 };
 const intervals = [];
 const timeouts = [];
+const frames = [];
+let nowMs = 1_700_000_000_000;
 const sandbox = {
-    Date,
+    Date: { now: () => nowMs },
+    requestAnimationFrame(callback) { frames.push(callback); },
     WebSocket: FakeWebSocket,
     clearInterval() {},
     clearTimeout(id) { if (timeouts[id - 1]) timeouts[id - 1].cancelled = true; },
@@ -135,5 +138,19 @@ socket.emit('message', { data: JSON.stringify({ type: 'clock-ping', t: 123 }) })
 assert.strictEqual(socket.sent[5].type, 'clock-pong');
 assert.strictEqual(socket.sent[5].t, 123);
 assert.ok(Number.isFinite(socket.sent[5].tvMs));
+
+// webOS refreshes currentTime five times a second. Without the subtitle clock, a change
+// is reported with the moment the frame loop saw it, so a sample is not up to 200 ms stale.
+video.paused = false;
+sandbox.window.__assCtl = { video, clock: { running: false } };
+intervals[0]();
+frames.shift()();
+video.currentTime = 20; nowMs += 16; frames.shift()();
+nowMs += 150;
+const fresh = sandbox.window.__watchParty.state();
+assert.strictEqual(fresh.positionSeconds, 20);
+assert.strictEqual(fresh.sampledAtMs, nowMs - 150 - 8, 'timestamp of the change, between the two frames around it');
+nowMs += 400;
+assert.strictEqual(sandbox.window.__watchParty.state().sampledAtMs, nowMs, 'no change for half a second: stalled, so read as of now');
 
 console.log('watch-party controller tests passed');

@@ -43,8 +43,27 @@
         }
     }
 
-    function positionSeconds() {
-        if (!video) return 0;
+    // webOS refreshes video.currentTime only five times a second, so a value read at a
+    // random moment is up to 200 ms old. Note when each new value appears: paired with
+    // that moment the value is exact, and viewers extrapolate from the timestamp.
+    var clockValue = -1;
+    var clockAt = 0;
+    var clockTick = 0;
+    function watchClock() {
+        var now = Date.now();
+        var value = video ? video.currentTime : -1;
+        if (value !== clockValue) {
+            clockValue = value;
+            clockAt = now - clockTick < 100 ? (clockTick + now) / 2 : now;
+        }
+        clockTick = now;
+        requestAnimationFrame(watchClock);
+    }
+
+    // { position, at }: where the video was at the moment `at`.
+    function sample() {
+        var now = Date.now();
+        if (!video) return { position: 0, at: now };
         if (!video.paused) {
             try {
                 // The ASS clock is only trustworthy while it is RUNNING and its rAF loop is
@@ -55,21 +74,26 @@
                     && controller.clock.running && controller.jassub && !controller._seeking
                     ? controller.clock.now(performance.now())
                     : NaN;
-                if (isFinite(position) && position >= 0) return position;
+                if (isFinite(position) && position >= 0) return { position: position, at: now };
             } catch (error) {}
+            // A value that changed a moment ago is exact at that moment. An older one means
+            // playback stalled, so report it as read now and viewers stop advancing.
+            if (!video.seeking && clockValue === video.currentTime && clockValue >= 0 && now - clockAt < 400)
+                return { position: clockValue, at: clockAt };
         }
-        return isFinite(video.currentTime) && video.currentTime >= 0 ? video.currentTime : 0;
+        return { position: isFinite(video.currentTime) && video.currentTime >= 0 ? video.currentTime : 0, at: now };
     }
 
     function state(event) {
+        var current = sample();
         return {
-            sampledAtMs: Date.now(),
+            sampledAtMs: current.at,
             event: event || "heartbeat",
             buffering: Boolean(buffering || (video && video.seeking)),
             sessionId: sessionId,
             sequence: ++sequence,
             sourceRevision: sourceRevision,
-            positionSeconds: positionSeconds(),
+            positionSeconds: current.position,
             paused: Boolean(!video || video.paused || video.ended),
             playbackRate: video && isFinite(video.playbackRate) && video.playbackRate > 0 ? video.playbackRate : 1,
             durationSeconds: video && isFinite(video.duration) ? video.duration : null,
@@ -196,6 +220,7 @@
 
     tick();
     setInterval(tick, 500);
+    requestAnimationFrame(watchClock);
     connect();
 
     window.__watchParty = {
