@@ -49,6 +49,8 @@ build: service/server.js service/bin/ffmpeg service/bin/ffprobe
 	@cp app/service-connection.js service/www/
 	@echo "==> OLED pass: true-black background..."
 	@perl -pi -e 's/#0c0c10/#000000/g; s/rgba\(12, 12, 16/rgba(0, 0, 0/g' service/www/*.js service/www/index.html
+	@echo "==> No-green pass: the theme accent becomes white..."
+	@perl -pi -e 's/hsl\(147\.7, 68%, 51\.7%\)|#21d07a/hsla(0, 0%, 100%, 0.9)/g; s/(\.toggle-EKrug\.checked::before \{\\n)/$$1  background-color: #000000;\\n/g; s/(\.stream-rpXLF\[focused\] \.play-icon-Z9iaQ \{\\n[^}]*\})/$$1\\n.stream-rpXLF[focused] .play-icon-Z9iaQ .icon-MGVZf {\\n  color: #000000;\\n}/g' service/www/*.js
 	@echo "==> Build complete"
 
 package: build

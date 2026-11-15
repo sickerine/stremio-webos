@@ -21,10 +21,6 @@
         var generation = 0;
         var activeMediaKey = null;
         var suppressedSkip = null;
-        var floating = null;        // { key, since }: the button currently shown without the controls
-        var dismissedKey = null;
-        var floatTimer = null;
-        var FLOAT_MS = 10000;
         var MAX_MEDIA_ATTEMPTS = 120;
 
         function unwrapMediaUrl(url) {
@@ -68,8 +64,6 @@
             if (nextKey === activeMediaKey) return;
             activeMediaKey = nextKey;
             suppressedSkip = null;
-            floating = null;
-            dismissedKey = null;
         }
 
         function load(input, apply) {
@@ -116,47 +110,10 @@
             return time >= from && time <= to;
         }
 
-        function segmentType(time, data, allowOutro) {
+        // Which segment the skip button is for at this time, if any.
+        function visibleType(time, data, allowOutro) {
             if (data && shouldShow('intro', time, data.intro)) return 'intro';
             if (allowOutro && data && shouldShow('outro', time, data.outro)) return 'outro';
-            return null;
-        }
-
-        function segmentKey(type, data) {
-            return type + ':' + (data && data[type] ? data[type].to : '');
-        }
-
-        // With the controls open the button stays for the whole segment. Alone on
-        // screen it holds the remote, so it shows for FLOAT_MS and can be dismissed.
-        // onFloatEnd runs when the time is up: playback time stops while paused, so
-        // nothing else would ask again.
-        function visibleType(time, data, allowOutro, controlsVisible, now, onFloatEnd) {
-            clearTimeout(floatTimer);
-            var type = segmentType(time, data, allowOutro);
-            if (!type) {
-                floating = null;
-                dismissedKey = null;
-                return null;
-            }
-            if (controlsVisible) return type;
-            var key = segmentKey(type, data);
-            if (key === dismissedKey) return null;
-            now = now == null ? Date.now() : now;
-            if (!floating || floating.key !== key) floating = { key: key, since: now };
-            var left = FLOAT_MS - (now - floating.since);
-            if (left <= 0) return null;
-            if (onFloatEnd) floatTimer = setTimeout(onFloatEnd, left);
-            return type;
-        }
-
-        function dismiss(type, data) {
-            dismissedKey = segmentKey(type, data);
-        }
-
-        // What a remote key does while the button is alone on screen.
-        function floatingKey(keyCode) {
-            if (keyCode === 461 || keyCode === 8 || keyCode === 27 || keyCode === 40) return 'dismiss';   // Back, Down
-            if (keyCode === 37 || keyCode === 38 || keyCode === 39) return 'controls';                    // Left, Up, Right
             return null;
         }
 
@@ -167,24 +124,12 @@
             return isFinite(target) ? target : null;
         }
 
-        function shouldHandlePlayerOk(controlsVisible, menuVisible, nextVisible, skipVisible) {
-            return !controlsVisible && !menuVisible && !nextVisible && !skipVisible;
-        }
-
-        function shouldHandlePlayerActivity(controlsVisible, skipVisible) {
-            return controlsVisible || !skipVisible;
-        }
-
         return {
             load: load,
             clear: clear,
             markSkipped: markSkipped,
             visibleType: visibleType,
-            dismiss: dismiss,
-            floatingKey: floatingKey,
             skipTarget: skipTarget,
-            shouldHandlePlayerOk: shouldHandlePlayerOk,
-            shouldHandlePlayerActivity: shouldHandlePlayerActivity,
         };
     }
 

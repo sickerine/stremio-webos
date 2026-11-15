@@ -1,26 +1,68 @@
 --- player.chunk.js
 +++ player.chunk.js
-@@ -1094,7 +1094,7 @@
+@@ -1092,40 +1092,31 @@
+                     const {
+                         t: t
                      } = (0, u.B)();
-                     return (0, o.a0)(g.Gk, {
+-                    return (0, o.a0)(g.Gk, {
++                    return (0, o.a0)(g.zo, {
                          get class() {
 -                            return ce["intro-outro-popup"]
-+                            return F()(ce["intro-outro-popup"], e.controlsVisible && ce["with-controls"])
++                            return F()(ce.skip, e.floating && ce.floating)
                          },
++                        get style() {
++                            return e.floating ? {
++                                left: e.left
++                            } : void 0
++                        },
++                        get autoFocus() {
++                            return !!e.floating
++                        },
++                        get onPress() {
++                            return e.onSkip
++                        },
++                        get onClick() {
++                            return e.onSkip
++                        },
                          get children() {
-                             return [(0, o.a0)(o.wv, {
-@@ -1124,7 +1124,9 @@
-                                 get label() {
-                                     return t("intro" === e.skipIntroOutroType ? "PLAYER_SKIP_INTRO" : "PLAYER_SKIP_OUTRO")
+-                            return [(0, o.a0)(o.wv, {
+-                                get when() {
+-                                    return "outro" === e.skipIntroOutroType
++                            return [(0, o.a0)(a.A, {
++                                get class() {
++                                    return ce.icon
                                  },
+-                                get children() {
+-                                    return (0, o.a0)(m.$n, {
+-                                        get onPress() {
+-                                            return e.onDismiss
+-                                        },
+-                                        get class() {
+-                                            return ce.button
+-                                        },
+-                                        get label() {
+-                                            return t("PLAYER_NEXT_VIDEO_BUTTON_DISMISS")
+-                                        }
+-                                    })
+-                                }
+-                            }), (0, o.a0)(m.$n, {
+-                                get onPress() {
+-                                    return e.onSkip
+-                                },
+-                                get class() {
+-                                    return F()(ce.button, ce.confirm)
+-                                },
+-                                get label() {
+-                                    return t("intro" === e.skipIntroOutroType ? "PLAYER_SKIP_INTRO" : "PLAYER_SKIP_OUTRO")
+-                                },
 -                                autoFocus: !0
-+                                get autoFocus() {
-+                                    return !e.controlsVisible
-+                                }
-                             })]
+-                            })]
++                                name: "next"
++                            }), t("intro" === e.skipIntroOutroType ? "PLAYER_SKIP_INTRO" : "PLAYER_SKIP_OUTRO")]
                          }
                      })
-@@ -1137,7 +1139,7 @@
+                 };
+@@ -1137,7 +1128,7 @@
                      ctx: w,
                      player: T,
                      streamingServer: A
@@ -29,7 +71,7 @@
                      stream: He,
                      videoParams: Ye,
                      paused: Ne,
-@@ -1207,23 +1209,27 @@
+@@ -1207,21 +1198,20 @@
                          y.size() > 2 && await y.back(), y.navigate(null == t ? void 0 : t.metaDetailsStreams, !0), y.navigate((function(){var __p=null==t?void 0:t.player;try{if(window.__assBinge&&__p){var __m=(__p.match(/kitsu:\d+:\d+/)||[])[0];var __l=window.__assBinge.lockHash(__m);if(__l)return __l;}}catch(e){}return __p})())
                      } else y.back()
                  }, mt = () => {
@@ -45,26 +87,19 @@
 +                        null !== r && (window.AnimeSkip.markSkipped(Ie(), r), st(r), we())
                      }
                      "outro" === Ie() && Ee(!0), B()
-                 }, ft = () => {
-                     B(), Ee(!0)
--                }, vt = () => {
-+                }, __wake = () => {
+-                }, ft = () => {
+-                    B(), Ee(!0)
+                 }, vt = () => {
                      Ce(!1), k((() => {
                          Te(), Ce(!0)
                      }))
-+                }, vt = () => {
-+                    window.AnimeSkip.shouldHandlePlayerActivity(tt(), j()) && __wake()
-+                }, __skipKey = e => {
-+                    if (!j() || tt() || nt()) return;
-+                    const t = window.AnimeSkip.floatingKey(e.keyCode);
-+                    "dismiss" === t ? (e.preventDefault(), e.stopImmediatePropagation(), window.AnimeSkip.dismiss(Ie(), __skipData()), "outro" === Ie() ? ft() : B()) : "controls" === t && __wake()
++                }, __skipFloating = () => j() && !tt() && !nt() && !V(), __skipOk = e => {
++                    // OK on the lone skip button: skip here, before the remote handler wakes the controls and unmounts it
++                    [13, 29443, 65376].includes(e.keyCode) && __skipFloating() && (e.preventDefault(), e.stopImmediatePropagation(), mt())
                  }, ht = () => {
--                    !tt() && !nt() && !V() && at()
-+                    window.AnimeSkip.shouldHandlePlayerOk(tt(), nt(), V(), j()) && at()
+                     !tt() && !nt() && !V() && at()
                  }, yt = () => {
-                     !tt() && !nt() && !V() && we()
-                 }, kt = () => {
-@@ -1266,6 +1272,18 @@
+@@ -1266,6 +1256,18 @@
                          C.setProp("subtitlesOffset", e), C.setProp("subtitlesSize", t), C.setProp("subtitlesTextColor", n), C.setProp("subtitlesOutlineColor", r), C.setProp("subtitlesBackgroundColor", o), C.setProp("subtitlesOpacity", l), C.setProp("extraSubtitlesOffset", e), C.setProp("extraSubtitlesSize", t), C.setProp("extraSubtitlesTextColor", n), C.setProp("extraSubtitlesOutlineColor", r), C.setProp("extraSubtitlesBackgroundColor", o), C.setProp("extraSubtitlesOpacity", l)
                      }
                  })), (0, o.EH)((() => {
@@ -83,7 +118,7 @@
                      if (T.loaded() && C.ready() && null !== He()) {
                          const {
                              subtitles: e
-@@ -1305,14 +1323,13 @@
+@@ -1305,14 +1307,13 @@
                          de() || null !== e || null !== t || (C.disableSubtitlesTracks(), ce(!0))
                      }
                  })), (0, o.EH)((() => {
@@ -98,41 +133,73 @@
 -                    qe() && null !== Be() && !Pe() && null !== l && null !== a && (null !== d && l >= d || l < a && a - l <= We() ? $() : _()), null !== s && null !== u && null !== l && null !== a && (l >= s && l <= u ? (Oe("intro"), G()) : null !== d && l > s + 15e3 && l < d ? B() : null !== d && l >= d && null === Be() && !Pe() ? (Oe("outro"), G()) : B())
 +                        i = __skipData(),
 +                        d = null !== (e = null == i ? void 0 : i.outro) && void 0 !== e ? e : null,
-+                        c = null !== l && null !== a ? window.AnimeSkip.visibleType(l, i, null === Be() && !Pe(), tt() || nt(), void 0, B) : null;
++                        c = null !== l && null !== a ? window.AnimeSkip.visibleType(l, i, null === Be() && !Pe()) : null;
 +                    qe() && null !== Be() && !Pe() && null !== l && null !== a && (null !== d && l >= d.from || l < a && a - l <= We() ? $() : _()), null !== c ? (Oe(c), G()) : B()
                  })), (0, o.EH)((() => {
                      const n = C.error();
                      n && !n.critical && t.show({
-@@ -1342,9 +1359,9 @@
+@@ -1342,9 +1343,9 @@
                  })), (0, o.EH)((() => {
                      C.unload(), T.unload(), T.load(v())
                  })), (0, o.Rc)((() => {
 -                    h.on("play", lt), h.on("pause", at), h.on("playPause", it), h.on("stop", bt), h.on("left", yt), h.on("right", yt), h.on("ok", ht), h.on("any", vt), window.addEventListener("mousemove", vt), vt()
-+                    h.on("play", lt), h.on("pause", at), h.on("playPause", it), h.on("stop", bt), h.on("left", yt), h.on("right", yt), h.on("ok", ht), h.on("any", vt), window.addEventListener("mousemove", vt), window.addEventListener("keydown", __skipKey, !0), vt()
++                    h.on("play", lt), h.on("pause", at), h.on("playPause", it), h.on("stop", bt), h.on("left", yt), h.on("right", yt), h.on("ok", ht), h.on("any", vt), window.addEventListener("mousemove", vt), window.addEventListener("keydown", __skipOk, !0), vt()
                  })), (0, o.Ki)((() => {
 -                    C.unload(), T.unload(), h.off("play", lt), h.off("pause", at), h.off("playPause", it), h.off("stop", bt), h.off("left", yt), h.off("right", yt), h.off("ok", ht), h.off("any", vt), window.removeEventListener("mousemove", vt)
-+                    C.unload(), T.unload(), h.off("play", lt), h.off("pause", at), h.off("playPause", it), h.off("stop", bt), h.off("left", yt), h.off("right", yt), h.off("ok", ht), h.off("any", vt), window.removeEventListener("mousemove", vt), window.removeEventListener("keydown", __skipKey, !0)
++                    C.unload(), T.unload(), h.off("play", lt), h.off("pause", at), h.off("playPause", it), h.off("stop", bt), h.off("left", yt), h.off("right", yt), h.off("ok", ht), h.off("any", vt), window.removeEventListener("mousemove", vt), window.removeEventListener("keydown", __skipOk, !0)
                  })), (0, o.a0)(m.YW, {
                      get class() {
                          return ne.player
-@@ -1539,6 +1556,9 @@
-                                     onDismiss: ft,
+@@ -1444,6 +1445,18 @@
+                                                                     onClick: bt
+                                                                 })
+                                                             }
++                                                        }), (0, o.a0)(o.wv, {
++                                                            get when() {
++                                                                return j()
++                                                            },
++                                                            get children() {
++                                                                return (0, o.a0)(pe, {
++                                                                    onSkip: mt,
++                                                                    get skipIntroOutroType() {
++                                                                        return Ie()
++                                                                    }
++                                                                })
++                                                            }
+                                                         })]
+                                                     }
+                                                 }), (0, o.a0)(g.Gk, {
+@@ -1531,12 +1544,16 @@
+                             }
+                         }), (0, o.a0)(o.wv, {
+                             get when() {
+-                                return (0, r.ph)((() => !(!j() || Pe())))() && !V()
++                                return __skipFloating()
+                             },
+                             get children() {
+                                 return (0, o.a0)(pe, {
+                                     onSkip: mt,
+-                                    onDismiss: ft,
++                                    floating: !0,
++                                    get left() {
++                                        // where it sits in the control row: after play/pause, and after next when shown
++                                        return rt() ? "13rem" : "7.5rem"
++                                    },
                                      get skipIntroOutroType() {
                                          return Ie()
-+                                    },
-+                                    get controlsVisible() {
-+                                        return tt() || nt()
                                      }
-                                 })
-                             }
-@@ -1775,8 +1795,9 @@
+@@ -1775,10 +1792,10 @@
                  o = n.n(r),
                  l = n(3645),
                  a = n.n(l)()(o());
 -            a.push([e.id, ".intro-outro-popup-U6iEs {\n  position: absolute;\n  z-index: 3;\n  bottom: 8rem;\n  right: 0;\n  margin: 2rem;\n  display: flex;\n  flex-direction: row;\n}\n.intro-outro-popup-U6iEs > * {\n  margin: 0 1rem 0 1rem;\n}\n.intro-outro-popup-U6iEs > :first-child {\n  margin-left: 0;\n}\n.intro-outro-popup-U6iEs > :last-child {\n  margin-right: 0;\n}\n.intro-outro-popup-U6iEs .button-FRNRT {\n  background-color: #0c0c10;\n  border: 0.2rem solid transparent;\n}\n.intro-outro-popup-U6iEs .button-FRNRT[focused],\n.intro-outro-popup-U6iEs .button-FRNRT:hover {\n  border: 0.2rem solid rgba(255, 255, 255, 0.5);\n}\n.intro-outro-popup-U6iEs .button-FRNRT.confirm-laDC1[focused],\n.intro-outro-popup-U6iEs .button-FRNRT.confirm-laDC1:hover {\n  border: 0.2rem solid hsl(147.7, 68%, 51.7%);\n}\n", ""]), a.locals = {
-+            a.push([e.id, ".intro-outro-popup-U6iEs {\n  position: absolute;\n  z-index: 3;\n  bottom: 2rem;\n  left: 0;\n  margin: 2rem;\n  display: flex;\n  flex-direction: row;\n}\n.intro-outro-popup-U6iEs.with-controls-Hxc1A {\n  bottom: 8rem;\n}\n.intro-outro-popup-U6iEs > * {\n  margin: 0 1rem 0 1rem;\n}\n.intro-outro-popup-U6iEs > :first-child {\n  margin-left: 0;\n}\n.intro-outro-popup-U6iEs > :last-child {\n  margin-right: 0;\n}\n.intro-outro-popup-U6iEs .button-FRNRT {\n  background-color: #0c0c10;\n  border: 0.2rem solid transparent;\n}\n.intro-outro-popup-U6iEs .button-FRNRT[focused],\n.intro-outro-popup-U6iEs .button-FRNRT:hover {\n  border: 0.2rem solid rgba(255, 255, 255, 0.5);\n}\n.intro-outro-popup-U6iEs .button-FRNRT.confirm-laDC1[focused],\n.intro-outro-popup-U6iEs .button-FRNRT.confirm-laDC1:hover {\n  border: 0.2rem solid hsl(147.7, 68%, 51.7%);\n}\n", ""]), a.locals = {
-                 "intro-outro-popup": "intro-outro-popup-U6iEs",
-+                "with-controls": "with-controls-Hxc1A",
-                 button: "button-FRNRT",
-                 confirm: "confirm-laDC1"
+-                "intro-outro-popup": "intro-outro-popup-U6iEs",
+-                button: "button-FRNRT",
+-                confirm: "confirm-laDC1"
++            a.push([e.id, ".skip-U6iEs {\n  height: 4.5rem;\n  display: flex;\n  align-items: center;\n  padding: 0 1.5rem 0 1rem;\n  border-radius: 1rem;\n  font-size: 1.5rem;\n  font-weight: 600;\n  white-space: nowrap;\n  color: hsla(0, 0%, 100%, 0.9);\n  transition: background-color 0.1s ease-in-out;\n}\n.skip-U6iEs .icon-Hxc1A {\n  height: 2.5rem;\n  margin-right: 0.75rem;\n  color: inherit;\n}\n.skip-U6iEs:hover,\n.skip-U6iEs[focused] {\n  background-color: #2a2a2d;\n}\n.skip-U6iEs.floating-FRNRT {\n  position: absolute;\n  z-index: 3;\n  bottom: 10rem;\n}\n", ""]), a.locals = {
++                skip: "skip-U6iEs",
++                icon: "icon-Hxc1A",
++                floating: "floating-FRNRT"
              };
+             const i = a
+         },

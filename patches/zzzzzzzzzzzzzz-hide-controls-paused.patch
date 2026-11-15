@@ -1,0 +1,20 @@
+--- player.chunk.js
++++ player.chunk.js
+@@ -1164,7 +1164,7 @@
+                 })), et = () => {
+                     const e = C.error();
+                     return null != e && e.critical ? e : null
+-                }, tt = () => et() || Ne() || De() || !Ae(), nt = () => P() || O() || N() || D() || J() || W() || re() || ae(), rt = () => qe() && Be(), ot = () => {
++                }, tt = () => et() || De() || !Ae(), nt = () => P() || O() || N() || D() || J() || W() || re() || ae(), rt = () => qe() && Be(), ot = () => {
+                     var e;
+                     return `${Z(null!==(e=ke())&&void 0!==e?e:Re())} / ${Z(Le())}`
+                 }, lt = () => {
+@@ -1213,7 +1213,7 @@
+                     // OK on the lone skip button: skip here, before the remote handler wakes the controls and unmounts it
+                     [13, 29443, 65376].includes(e.keyCode) && __skipFloating() && (e.preventDefault(), e.stopImmediatePropagation(), mt())
+                 }, ht = () => {
+-                    !tt() && !nt() && !V() && at()
++                    !tt() && !nt() && !V() && it()
+                 }, yt = () => {
+                     !tt() && !nt() && !V() && we()
+                 }, kt = () => {

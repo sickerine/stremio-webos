@@ -1,0 +1,26 @@
+--- player.chunk.js
++++ player.chunk.js
+@@ -1220,6 +1220,11 @@
+                     I(), Y(), L(), M(), q(), te(), le()
+                 }, St = () => {
+                     Ee(!0), _(), we()
++                }, __upHides = e => {
++                    // Up from the top control row hides the controls instead of waiting for the timeout
++                    if (![38, 29460].includes(e.keyCode) || et() || De() || Ae() || nt() || V()) return;
++                    const t = document.querySelector("." + ne.overlay + " [focused]");
++                    t && t.closest("." + ne.controls) && !t.closest("." + ne.footer) && (e.preventDefault(), e.stopImmediatePropagation(), Te(), Ce(!0))
+                 };
+                 return (0, o.EH)((() => {
+                     if (T.loaded() && C.ready() && !C.loaded()) {
+@@ -1343,9 +1348,9 @@
+                 })), (0, o.EH)((() => {
+                     C.unload(), T.unload(), T.load(v())
+                 })), (0, o.Rc)((() => {
+-                    h.on("play", lt), h.on("pause", at), h.on("playPause", it), h.on("stop", bt), h.on("left", yt), h.on("right", yt), h.on("ok", ht), h.on("any", vt), window.addEventListener("mousemove", vt), window.addEventListener("keydown", __skipOk, !0), vt()
++                    h.on("play", lt), h.on("pause", at), h.on("playPause", it), h.on("stop", bt), h.on("left", yt), h.on("right", yt), h.on("ok", ht), h.on("any", vt), window.addEventListener("mousemove", vt), window.addEventListener("keydown", __skipOk, !0), window.addEventListener("keydown", __upHides, !0), vt()
+                 })), (0, o.Ki)((() => {
+-                    C.unload(), T.unload(), h.off("play", lt), h.off("pause", at), h.off("playPause", it), h.off("stop", bt), h.off("left", yt), h.off("right", yt), h.off("ok", ht), h.off("any", vt), window.removeEventListener("mousemove", vt), window.removeEventListener("keydown", __skipOk, !0)
++                    C.unload(), T.unload(), h.off("play", lt), h.off("pause", at), h.off("playPause", it), h.off("stop", bt), h.off("left", yt), h.off("right", yt), h.off("ok", ht), h.off("any", vt), window.removeEventListener("mousemove", vt), window.removeEventListener("keydown", __skipOk, !0), window.removeEventListener("keydown", __upHides, !0)
+                 })), (0, o.a0)(m.YW, {
+                     get class() {
+                         return ne.player
