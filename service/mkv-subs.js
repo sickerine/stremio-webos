@@ -64,6 +64,7 @@ var MAX_LEAF_BYTES = 64 * 1024 * 1024;
 
 function MkvSubDemux(cb) {
     this.cb = cb || {};
+    this.isMatroska = null;
     this.buf = Buffer.alloc(0);
     this.tsScale = 1e6;          // ns per tick (default 1ms)
     this.tracks = [];            // {number, type, codec, codecPrivate, lang, name}
@@ -205,6 +206,7 @@ MkvSubDemux.prototype._block = function (data, durTicks) {
 // a gap (seek) triggers a resync to the next Cluster boundary. The header
 // (Tracks/CodecPrivate/attachments) is parsed from the initial offset-0 range.
 MkvSubDemux.prototype.pushAt = function (offset, buf) {
+    if (this.isMatroska === false) return;
     if (this._sPending && offset === this._sAbs + this._sPending.length + this._sHeldLen) {   // contiguous
         // A leaf bigger than a chunk (an 18 MB attached font) is waited for. Joining on
         // every chunk re-copied the whole wait each time: 10 GB of copying for that
@@ -219,6 +221,14 @@ MkvSubDemux.prototype.pushAt = function (offset, buf) {
         if (offset !== 0) this._needResync = true;                    // jumped mid-file
     }
     this._sHeld = []; this._sHeldLen = 0; this._sWant = 0;
+    if (this.isMatroska === null && this._sAbs === 0) {
+        if (this._sPending.length < 4) return;
+        this.isMatroska = this._sPending.readUInt32BE(0) === 0x1a45dfa3;
+        if (!this.isMatroska) {
+            this._sPending = Buffer.alloc(0);
+            return;
+        }
+    }
     this._parseStream();
 };
 // Find the next real Cluster start. The bare 4-byte ID (0x1F43B675) occurs by

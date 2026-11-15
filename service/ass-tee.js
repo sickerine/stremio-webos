@@ -218,6 +218,13 @@ Session.prototype._bootstrap = function () {
     if (self._head) { self._head = []; self._headLength = 0; self._headPlanned = 0; }
     PX.fetchRange(self.pinned, 'bytes=0-' + (BOOTSTRAP_MAX_BYTES - 1), function (err, up, finalUrl) {
         if (err || !up) { self._finishPin(); failed(); return; }
+        if (up.statusCode !== 200 && up.statusCode !== 206) {
+            up.on('error', function () {});
+            up.destroy();
+            self._finishPin();
+            failed();
+            return;
+        }
         if (finalUrl && finalUrl !== self.pinned && /^https?:/.test(finalUrl) && finalUrl.indexOf('/resolve/') < 0) self.pinned = finalUrl;
         var total = /\/(\d+)\s*$/.exec(up.headers['content-range'] || '');
         if (total) self.size = +total[1];
@@ -232,8 +239,10 @@ Session.prototype._bootstrap = function () {
             // the middle of the file, while they are still coming in. The tracks are complete
             // by then: list them, so dialogue shows at once and mid-file streams are read.
             if (self.cut && !self.tracksIn && hd.tracks.length && hd._sPos >= self.cut.start) { self._adoptTracks(hd); self._finishBootstrap(); }
-            if (hd._curCluster && !self.ready) {         // header+fonts done -> capture tracks
+            if ((hd.isMatroska === false || hd._curCluster) && !self.ready) {
                 settled = true;
+                // Non-MKV containers still pass through unchanged. They have no
+                // tracks for this MKV extractor, so stop bootstrap immediately.
                 if (self._head) self._planView();
                 self._adoptTracks(hd);
                 self.ready = true;
@@ -456,6 +465,9 @@ var tee = http.createServer(function (req, res) {
     var demux = null, pre = [], preLen = 0, closed = false;
     function makeDemux() {
         if (demux) return;
+        // A mid-file range has no container signature. Wait for a verified
+        // header rather than interpreting arbitrary MP4 bytes as MKV elements.
+        if (start !== 0 && !sess.tracksIn) return;
         if (!sess.hasTextSubs()) { pre = null; return; }                 // nothing to extract: pure passthrough
         demux = sess.newDemux();
         if (pre) { for (var i = 0; i < pre.length; i++) { try { demux.pushAt(pre[i][0], pre[i][1]); } catch (e) {} } pre = null; }
@@ -504,7 +516,11 @@ var tee = http.createServer(function (req, res) {
             pending -= n; conn.progressAt = _now(); if (paused && pending <= (READAHEAD_CAP >> 1)) { paused = false; conn.paused = false; try { up.resume(); } catch (e) {} } }; }
         up.on('data', function (c) {
             if (clientGone || res.destroyed || res.writableEnded) { stopUpstream(); return; }
-            if (demux) { sess.demuxedBytes += c.length; try { demux.pushAt(off, c); } catch (e) {} }
+            if (demux) {
+                sess.demuxedBytes += c.length;
+                try { demux.pushAt(off, c); } catch (e) {}
+                if (demux.isMatroska === false) demux = null;
+            }
             else if (pre) {                                                            // still buffering (not closed)
                 if (preLen < 16777216) { pre.push([off, c]); preLen += c.length; }     // buffer until bootstrapDone
                 else { makeDemux(); if (demux) { try { demux.pushAt(off, c); } catch (e) {} } }   // overflow: proceed best-effort

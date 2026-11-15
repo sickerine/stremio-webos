@@ -1,5 +1,5 @@
-// A truncated MKV header must not poison the subtitle session forever.
-// The first retry burst ends immediately before the first Cluster. A later
+// An HTTP error or truncated MKV header must not poison the subtitle session.
+// The first retry burst gets an error, then ends before the first Cluster. A later
 // status poll must start a fresh burst, receive the complete synthetic MKV, and
 // publish its embedded subtitle track instead of preserving a poisoned session.
 var assert = require('node:assert/strict');
@@ -35,6 +35,10 @@ var cdn = http.createServer(function (req, res) {
     var range = req.headers.range || '';
     if (/^bytes=0-\d+$/.test(range)) {
         bootstrapHits++;
+        if (bootstrapHits === 1) {
+            res.writeHead(503, { 'content-type': 'text/html' });
+            return res.end('<html>temporarily unavailable</html>');
+        }
         return send(res, bootstrapHits <= 2 ? media.slice(0, info.headerLen) : media);
     }
     var match = /bytes=(\d+)-(\d*)/.exec(range);
