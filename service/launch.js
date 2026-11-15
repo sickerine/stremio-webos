@@ -40,19 +40,23 @@ function reapOldInstances() {
     return killed.length;
 }
 reapOldInstances();
+require('./watchdog').start();
 // Drop tee streams whose app page has died (orphaned LG pipeline) or that stalled.
 setInterval(function () { try { var r = assTee.reap(); if (r.dropped) console.log('[launch] tee reap: dropped ' + r.dropped + (r.pageGone ? ' (page gone)' : ' (stalled)')); } catch (e) {} }, 15000);
 
-// Keep the service alive indefinitely
-service.activityManager.create('keepAlive', function() {});
+// The app's subscription keeps this service alive. Allow a grace period for
+// page navigation, then let webOS stop it after the app closes.
+service.activityManager.idleTimeout = 30;
 
 // Register the start method — responds once the HTTP server is listening
 service.register('start', function(message) {
     if (ready) {
-        message.respond({ ready: true });
+        message.respond({ returnValue: true, ready: true, subscribed: message.isSubscription });
     } else {
         pendingMessages.push(message);
     }
+}, function (message) {
+    pendingMessages = pendingMessages.filter(function (pending) { return pending.uniqueToken !== message.uniqueToken; });
 });
 
 // Static file serving
@@ -640,7 +644,7 @@ var proxyServer = http.createServer(function(req, res) {
 function onProxyReady() {
     ready = true;
     // Respond to any start calls that arrived before the server was ready
-    pendingMessages.forEach(function(msg) { msg.respond({ ready: true }); });
+    pendingMessages.forEach(function(msg) { msg.respond({ returnValue: true, ready: true, subscribed: msg.isSubscription }); });
     pendingMessages = [];
 }
 // If a stale instance still holds :8081 (reap raced a fresh spawn), kill it and retry
