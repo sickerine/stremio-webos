@@ -11,6 +11,7 @@ const ICONS = {
   sound: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>',
   film: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zm2 2v2h2V6zm0 4v2h2v-2zm0 4v2h2v-2zm10-8v2h2V6zm0 4v2h2v-2zm0 4v2h2v-2z"/></svg>',
   audio: '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
+  vlc: '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12.0319 0c-.8823 0-1.0545.136-1.0545.136-.1738.056-.3556.255-.4105.43L9.683 3.3808c.4729.1729 1.3222.4266 2.2337.4266 1.0987 0 2.017-.3494 2.3763-.5075L13.4352.566c-.055-.1755-.237-.3707-.4067-.4374 0 0-.1142-.1286-.9966-.1286zm3.5645 7.455c-.3601.34-1.3276.9373-3.6797.9373-2.2929 0-3.189-.5678-3.5213-.9113l-1.3887 4.4227c.2272.3614 1.2539 1.5594 4.8847 1.5594 3.7569 0 4.8539-1.3467 5.0649-1.6737zm-8.5897 4.4487l-1.0025 3.1922H4.3428c-.2486 0-.5097.1932-.5826.4315l-2.334 7.6317a.3962.3962 0 0 0-.0169.1537c-.0008.0053-.002.0099-.002.016 0 .0839.0233.226.0233.226.0322.2456.2612.4452.5098.4452h20.1192c.2487 0 .4768-.1994.5098-.4453 0 0 .0234-.142.0234-.226a.0245.0245 0 0 0-.0025-.01.3201.3201 0 0 0 .0024-.0313.4096.4096 0 0 0-.019-.1282l-2.3339-7.6318c-.0729-.2383-.334-.4314-.5826-.4314h-1.6636l.2005.6391c-.2407.4854-1.4886 2.38-6.3027 2.38-4.6003 0-5.8288-1.73-6.1107-2.3072z"/></svg>',
   subs: '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z"/></svg>',
 };
 
@@ -48,6 +49,7 @@ export function buildUi(root) {
         <media-mute-button></media-mute-button>
         <media-volume-range></media-volume-range>
         <span class="gap"></span>
+        <media-chrome-button data-vlc-btn aria-label="Watch in VLC" hidden>${ICONS.vlc}<span slot="tooltip-content">Watch in VLC</span></media-chrome-button>
         <media-chrome-button data-audio-btn title="Audio">${ICONS.audio}</media-chrome-button>
         <media-chrome-button data-subs-btn title="Subtitles">${ICONS.subs}</media-chrome-button>
         <media-pip-button></media-pip-button>
@@ -67,6 +69,11 @@ export function buildUi(root) {
     overlay: q("[data-overlay]"), ovTitle: q("[data-ov-title]"), ovBody: q("[data-ov-body]"), steps: q("[data-steps]"), conn2: q("[data-conn2]"), room: q("[data-room]"), facts: q("[data-facts]"), sound: q("[data-sound]"),
     audioBtn: q("[data-audio-btn]"), audioMenu: q("[data-audio-menu]"), subsBtn: q("[data-subs-btn]"), subsMenu: q("[data-subs-menu]"),
   };
+
+  // Watching in VLC instead needs the follower file, which is for Windows (see /vlc).
+  const vlcBtn = q("[data-vlc-btn]");
+  vlcBtn.hidden = !/Windows/.test(navigator.userAgent);
+  vlcBtn.addEventListener("click", () => location.assign(`/vlc?room=${encodeURIComponent(new URLSearchParams(location.search).get("room") || "home")}`));
 
   // The TV is the only thing allowed to play/pause/seek. Swallow the surfaces that would.
   const block = e => { e.stopImmediatePropagation(); e.preventDefault(); };

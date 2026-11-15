@@ -93,6 +93,7 @@ media-control-bar > :is(media-mute-button, media-pip-button, media-fullscreen-bu
 media-control-bar media-chrome-button { display: inline-grid; place-items: center; }
 media-control-bar media-chrome-button svg { width: 24px; height: 24px; fill: currentColor; }
 media-control-bar media-chrome-button[disabled] { opacity: .35; }
+media-control-bar media-chrome-button[hidden] { display: none; }
 media-control-bar .gap { width: var(--space-3); }
 
 video::cue { font-family: var(--font); font-size: 2.6vh; font-weight: 500; color: #fff; background: rgba(0,0,0,.55); line-height: 1.35; }

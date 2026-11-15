@@ -9,8 +9,18 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { bestOffset, INITIAL_CLOCK_SAMPLES, CLOCK_BURST_GAP_MS } from "../shared/clock.js";
 import { loginPage } from "./login.js";
+import { vlcPage } from "./vlc-page.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
+// Watching in VLC on Windows: the follower script as a file a viewer downloads and
+// double-clicks. It is a .cmd that runs itself as PowerShell: cmd.exe reads the first
+// lines, PowerShell sees them as a comment. (A pasted "download and run" command would be
+// shorter, but Windows Defender blocks that shape as a trojan.)
+const VLC_FOLLOWER = readFileSync(new URL("./vlc-follow.ps1", import.meta.url), "utf8");
+const VLC_FOLLOWER_VERSION = createHash("sha1").update(VLC_FOLLOWER).digest("hex").slice(0, 12);
+const vlcLauncher = ({ relay, token, room }) => ["<# :", "@echo off", 'copy /y "%~f0" "%TEMP%\\watch-party-vlc.ps1" >nul',
+  'powershell -NoProfile -ExecutionPolicy Bypass -File "%TEMP%\\watch-party-vlc.ps1"', "if errorlevel 1 pause", "exit /b", "#>",
+  `$Relay = '${relay}'`, `$Token = '${token}'`, `$Room = '${room}'`, `$Version = '${VLC_FOLLOWER_VERSION}'`, VLC_FOLLOWER].join("\n").replace(/\r?\n/g, "\r\n");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".wasm": "application/wasm", ".woff2": "font/woff2", ".json": "application/json", ".svg": "image/svg+xml", ".map": "application/json" };
 
@@ -77,6 +87,13 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
   const authed = req => !token || (req.headers.cookie || "").split(/;\s*/).includes(`${COOKIE}=${token}`);
   const passwordOk = given => typeof given === "string" && timingSafeEqual(digest(given), digest(password));
   const tvKeyOk = given => !tvKey || (typeof given === "string" && timingSafeEqual(digest(given), digest(tvKey)));
+  // The address viewers reach this relay at (behind the tunnel the proxy says it was https).
+  const publicOrigin = req => {
+    const host = req.headers.host || "";
+    if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) return null;
+    return `${String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" ? "https" : "http"}://${host}`;
+  };
+  const roomOf = url => { const room = url.searchParams.get("room") || "home"; return /^[a-z0-9_-]{1,64}$/i.test(room) ? room : "home"; };
   const safeNext = n => (typeof n === "string" && /^\/(?!\/)/.test(n) ? n : "/");
   const rooms = new Map();
   const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null }); return rooms.get(id); };
@@ -113,6 +130,15 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
     if (!authed(req)) {
       if (req.method === "GET" && (req.headers.accept || "").includes("text/html")) { res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); res.end(loginPage({ next: url.pathname + url.search })); return; }
       res.writeHead(401, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: false, error: "password required" })); return;
+    }
+    if (req.method === "GET" && url.pathname === "/vlc") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(vlcPage({ room: roomOf(url), windows: /Windows/.test(req.headers["user-agent"] || "") })); return;
+    }
+    // The VLC follower for this viewer: this relay's address, the room and the sign-in filled in.
+    if (req.method === "GET" && url.pathname === "/vlc.cmd" && publicOrigin(req)) {
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": 'attachment; filename="Watch party in VLC.cmd"', "cache-control": "no-store" });
+      res.end(vlcLauncher({ relay: publicOrigin(req).replace(/^http/, "ws") + "/ws", token: token || "", room: roomOf(url) })); return;
     }
     if (req.method === "GET" && url.pathname === "/status") {
       const out = {};
@@ -157,7 +183,7 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
     const room = roomFor(roomId);
     socket.watchRole = role;
     room.clients.add(socket);
-    send(socket, { type: "hello", role, room: roomId, build, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
+    send(socket, { type: "hello", role, room: roomId, build, follower: VLC_FOLLOWER_VERSION, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
     let clockOffset = null, clockTimer = null, probeCount = 0, pending = null;
     const clockSamples = [], probes = new Set();
     const probe = () => {
