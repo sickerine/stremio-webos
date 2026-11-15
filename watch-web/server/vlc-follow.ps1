@@ -77,15 +77,17 @@ if input then
   local playing = vlc.playlist.status() == "playing"
   if (g.pause == "1" and playing) or (g.pause == "0" and vlc.playlist.status() == "paused") then vlc.playlist.pause() end
 end
-local t, length, rate, cache = -1, -1, 10000, -1
+local t, length, rate, cache, item = -1, -1, 10000, -1, 0
 if input then
+  local uri = (vlc.input.item() and vlc.input.item():uri()) or ""   -- a number that stands for what is open
+  for i = 1, #uri do item = (item * 31 + uri:byte(i)) % 2147483647 end
   t = vlc.var.get(input, "time")
   length = vlc.var.get(input, "length")
   rate = vlc.var.get(input, "rate") * 10000
   local ok, level = pcall(vlc.var.get, input, "cache")   -- how full the buffer is after a load or seek, 0 to 1
   if ok and level then cache = level * 1000 end
 end
-print(string.format("%.0f %.0f %.0f %s %.0f", t, length, rate, vlc.playlist.status(), cache))
+print(string.format("%.0f %.0f %.0f %s %.0f %.0f", t, length, rate, vlc.playlist.status(), cache, item))
 ?>
 '@
 $work = Join-Path $env:TEMP 'watch-party-vlc'
@@ -122,7 +124,8 @@ function Vlc([string]$query = '') {
     if ($part.Count -lt 4) { return $null }
     # ready: VLC has buffered enough to play the moment it is let go (a VLC that does not say counts as ready)
     $cache = if ($part.Count -gt 4) { [double]$part[4] } else { -1 }
-    return @{ t = [double]$part[0] / 1e6; length = [double]$part[1] / 1e6; rate = [double]$part[2] / 10000; status = $part[3]; ready = ($cache -lt 0 -or $cache -ge 990); at = ($before + $after) / 2 }
+    return @{ t = [double]$part[0] / 1e6; length = [double]$part[1] / 1e6; rate = [double]$part[2] / 10000; status = $part[3]; ready = ($cache -lt 0 -or $cache -ge 990)
+        item = $(if ($part.Count -gt 5) { [double]$part[5] } else { 0 }); at = ($before + $after) / 2 }
 }
 $ready = $false
 for ($i = 0; $i -lt 150 -and -not $vlc.HasExited; $i++) { if (Vlc) { $ready = $true; break }; Start-Sleep -Milliseconds 100 }
@@ -214,6 +217,8 @@ $loaded = $null       # what VLC has open: session and link
 $failed = $null       # the one that stopped or hung: next time it is opened through the TV's own link
 $opening = $false     # told to open it, not yet seen it loaded
 $openedAt = 0.0
+$item = 0             # what VLC called the stream once it had loaded it; anything else is the viewer's own file
+$length = 0.0         # how long the episode is
 $movedAt = 0.0        # when VLC last moved, or had a reason not to
 $lastT = $null        # last time VLC reported, to spot the moment it changes
 $rate = 1.0           # speed last sent to VLC
@@ -298,7 +303,7 @@ while (-not $vlc.HasExited) {
         $url = if ($failed -eq $wanted -and $tv.mediaUrl -and -not $env:WATCH_CDN_HOST) { $tv.mediaUrl } else { $media.url }
         if ($env:WATCH_CDN_HOST) { $swap = New-Object UriBuilder $url; $swap.Host = $env:WATCH_CDN_HOST; $url = $swap.Uri.AbsoluteUri }
         [void](Vlc ("?open=" + [Uri]::EscapeDataString($url) + "&name=" + [Uri]::EscapeDataString($name) + $options))
-        $loaded = $wanted; $opening = $true; $openedAt = $now; $movedAt = $now; $parkedAt = $now; $lastT = $null; $rate = 1.0; $nudging = $false; $average = $null; $landing = $false
+        $loaded = $wanted; $opening = $true; $item = 0; $length = 0.0; $openedAt = $now; $movedAt = $now; $parkedAt = $now; $lastT = $null; $rate = 1.0; $nudging = $false; $average = $null; $landing = $false
         $park = if ($hold) { $null } else { @{ target = $start; span = $openLead; seek = $false } }
         Say "Playing $name"
         Trace ('open at {0:0.000}, {1:0.00} s ahead, hold={2}' -f $start, $openLead, $hold)
@@ -308,20 +313,32 @@ while (-not $vlc.HasExited) {
     $s = Vlc
     if (-not $s) { Start-Sleep -Milliseconds 50; continue }
     if ($s.status -eq 'stopped' -or $s.t -lt 0) {
-        # Still opening. Or VLC gave up on the stream (link expired, network drop) or reached
-        # the end: then open it again, at most once a minute.
-        if ($now - $openedAt -gt 60000) { $failed = $loaded; $loaded = $null } elseif ($opening) { Status 'Loading the stream...' }
+        if ($opening) {
+            # Still opening. A link that will not open within a minute is given up on.
+            if ($now - $openedAt -gt 60000) { $failed = $loaded; $loaded = $null } else { Status 'Loading the stream...' }
+        } elseif ($length -gt 0 -and (Tv-Position $now) -gt $length - 3) {
+            # The episode is over here and nearly over on the TV: wait for the TV to move on.
+        } elseif ($now - $openedAt -gt 10000) {
+            # It was playing and now it is not: the viewer pressed Stop, or the stream broke.
+            # Open it again, not more often than every ten seconds.
+            Trace 'stopped; opening again'; $loaded = $null
+        }
         Start-Sleep -Milliseconds 100; continue
     }
     if ($opening -and $s.status -eq 'paused') {
-        $opening = $false
+        $opening = $false; $item = $s.item
         $openLead = Clamp (0.5 * $openLead + 0.5 * (($s.at - $openedAt) / 1000 + 1)) 2 20
         Trace ('loaded in {0:0.0} s; next file opens {1:0.0} s ahead' -f (($s.at - $openedAt) / 1000), $openLead)
     }
     if ($opening) {
         # Not loaded yet: these readings still belong to the last file, or to none. A VLC that
         # never reports the pause it was asked to start in counts as loaded after a while.
-        if ($now - $openedAt -gt 8000) { $opening = $false } else { Status 'Loading the stream...'; Start-Sleep -Milliseconds 50; continue }
+        if ($now - $openedAt -gt 8000) { $opening = $false; $item = $s.item } else { Status 'Loading the stream...'; Start-Sleep -Milliseconds 50; continue }
+    }
+    if ($s.length -gt 0) { $length = $s.length }
+    if ($item -and $s.item -and $s.item -ne $item) {
+        # The viewer opened something else in this window. The party's stream goes back on.
+        Trace 'another file was opened; opening the stream again'; $loaded = $null; continue
     }
     $changed = $null -ne $lastT -and $s.t -ne $lastT
     $lastT = $s.t

@@ -136,7 +136,10 @@ again.
 In the party window VLC's keyboard shortcuts for pause, seek and speed are switched
 off (Space, the arrow keys with and without modifiers, the speed keys, S, N, E). They
 are launch options: nothing is saved, and the viewer's own VLC keeps its keys. The
-buttons on VLC's bar still respond; the follower puts VLC back within a few seconds.
+buttons on VLC's bar and its menus still respond, but nothing a viewer does there
+sticks: a pause is undone in under a second, a speed change in about one, a seek, a
+Stop, or another file opened in the window in two to four (measured by doing each
+through VLC's control page).
 The stream does show up in VLC's own "Open Recent Media" list. VLC's switch for that
 (`--no-qt-recentplay`) is not used, because it also wipes the viewer's saved list.
 
