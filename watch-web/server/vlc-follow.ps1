@@ -99,6 +99,13 @@ $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
 $secret = [guid]::NewGuid().ToString('N')
 $vlcArgs = @('--extraintf=http', '--http-host=127.0.0.1', "--http-port=$port", "--http-password=$secret", "--http-src=`"$work`"",
     '--no-one-instance', '--no-qt-privacy-ask', '--no-qt-updates-notif', '--no-video-title-show')
+# In this window the keys for pause, seek and speed do nothing: a slip of the hand would only
+# throw VLC off until it is pulled back. These are launch options, so nothing is saved and
+# the viewer's own VLC keeps its keys. The buttons on VLC's bar are left as they are.
+foreach ($key in 'play-pause', 'pause', 'play', 'stop', 'faster', 'slower', 'rate-normal', 'rate-faster-fine', 'rate-slower-fine', 'next', 'prev', 'frame-next',
+    'jump-extrashort', 'jump+extrashort', 'jump-short', 'jump+short', 'jump-medium', 'jump+medium', 'jump-long', 'jump+long', 'chapter-prev', 'chapter-next',
+    'nav-left', 'nav-right') { $vlcArgs += "--key-$key=" }      # the plain arrows: outside a disc menu, left and right seek 10 s
+$vlcArgs += '--hotkeys-x-wheel-mode=-1'       # a sideways scroll would seek
 if ($env:WATCH_VLC_ARGS) { $vlcArgs += $env:WATCH_VLC_ARGS }
 $vlc = Start-Process -FilePath $vlcExe -ArgumentList $vlcArgs -PassThru
 $http = New-Object Net.Http.HttpClient

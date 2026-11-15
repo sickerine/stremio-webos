@@ -133,8 +133,12 @@ asks once whether to run the file ("The publisher could not be verified"). A fil
 from before a relay update or a password change says so and asks to be downloaded
 again.
 
-VLC's own pause, seek and speed controls still respond, but the follower puts VLC
-back within a few seconds.
+In the party window VLC's keyboard shortcuts for pause, seek and speed are switched
+off (Space, the arrow keys with and without modifiers, the speed keys, S, N, E). They
+are launch options: nothing is saved, and the viewer's own VLC keeps its keys. The
+buttons on VLC's bar still respond; the follower puts VLC back within a few seconds.
+The stream does show up in VLC's own "Open Recent Media" list. VLC's switch for that
+(`--no-qt-recentplay`) is not used, because it also wipes the viewer's saved list.
 
 Settings, as environment variables set before opening the file:
 
