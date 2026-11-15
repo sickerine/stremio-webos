@@ -75,17 +75,19 @@ try {
   const from = Date.now(); await sleep(20000);
   const steady = reports.filter(r => r.seen > from && r.status === "playing");
   assert.ok(steady.length >= 3, `expected a report every 5 s, got ${steady.length}`);
-  const worst = Math.max(...steady.map(r => Math.abs(r.gap) * 1000), ...steady.map(r => r.maxMs));
-  assert.ok(worst < 120, `drifted while playing: ${JSON.stringify(steady)}`);
-  log(`ok  holds for 20 s (median gap ${Math.max(...steady.map(r => r.medianMs))} ms, worst ${worst.toFixed(0)} ms, ${steady.reduce((n, r) => n + r.readings, 0)} readings)`);
+  // gapMs is the follower's own estimate; the check is on the gap worked out here.
+  const seen = steady.map(r => Math.abs(r.gap) * 1000), worst = Math.max(...seen, ...steady.map(r => r.maxMs));
+  assert.ok(worst < 60, `drifted while playing: ${JSON.stringify(steady)}`);
+  log(`ok  holds for 20 s (gap ${seen.map(g => g.toFixed(0)).join(", ")} ms at each report, worst the follower saw ${Math.max(...steady.map(r => r.maxMs))} ms)`);
 
   let at = Date.now(); await tv.skip(60);
   log(`ok  follows a 60 s skip (in sync again after ${(await report(25, "after a skip", playingInSync, at)).took.toFixed(0)} s)`);
 
   at = Date.now(); tv.setPaused(true);
-  const parked = await report(12, "pause", r => r.status === "paused" && Math.abs(r.gap) < 0.08, at);
+  // VLC waits a little past the TV's frame (what the TV covers before VLC can start on the news that it plays again).
+  const parked = await report(12, "pause", r => r.status === "paused" && r.gap > -0.08 && r.gap < 0.3, at);
   at = Date.now(); tv.setPaused(false);
-  log(`ok  pauses on the TV's frame (${(parked.gap * 1000).toFixed(0)} ms off) and resumes (in sync after ${(await report(15, "resume", playingInSync, at)).took.toFixed(0)} s)`);
+  log(`ok  pauses with the TV (${(parked.gap * 1000).toFixed(0)} ms past its frame) and resumes (in sync after ${(await report(15, "resume", playingInSync, at)).took.toFixed(0)} s)`);
 
   at = Date.now(); tv.setLoading(true); await sleep(4000); tv.setLoading(false);
   log(`ok  waits while the TV is loading (in sync after ${(await report(15, "after the TV loaded", playingInSync, at + 4000)).took.toFixed(0)} s)`);
