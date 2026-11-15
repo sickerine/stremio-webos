@@ -1,0 +1,13 @@
+--- video.chunk.js
++++ video.chunk.js
+@@ -21191,7 +21191,9 @@
+                 (function __audioPoll(n) { if (n <= 0) return; setTimeout(function() { try { A.__nativeAudioInit(); } catch (e) {} __audioPoll(n - 1); }, 500); })(20);
+             A.onloadedmetadata = function() {
+                     try { A.__nativeAudioInit(); } catch (e) {}
+-                    G("buffering"), G("buffered"), V("time", C)
++                    // A fresh episode starts at 0, where the player already is. Seeking there
++                    // anyway makes webOS drop what it has buffered and load it again: 4 to 5 s.
++                    G("buffering"), G("buffered"), (C > 1e3 && V("time", C))
+                 }, A.onvolumechange = function() {
+                     G("volume"), G("muted")
+                 }, A.onratechange = function() {
