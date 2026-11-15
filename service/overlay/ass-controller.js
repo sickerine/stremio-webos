@@ -140,10 +140,11 @@
     AssController.prototype.attach = function (subContent, fonts, availableFonts) {
         var v = this.video, self = this;
         if (typeof window.JASSUB !== 'function') { alog('JASSUB ctor missing'); return; }
-        // Transactional ownership: never overwrite a live JASSUB — tear the old worker
+        // Transactional ownership: never overwrite a live attachment — tear the old worker
         // down first or its ~60MB WASM heap leaks (notably across binge episode
-        // boundaries where this controller is reused without a route change).
-        this._destroyJassub();
+        // boundaries where this controller is reused without a route change), and with
+        // it the render loop, size timer and listeners, or each attach adds another set.
+        this.detach();
         // Suppress the app's native subtitle rendering (webOS surfaces the embedded
         // ASS track tag-stripped). We render it ourselves via libass.
         try { for (var ti = 0; ti < v.textTracks.length; ti++) v.textTracks[ti].mode = 'disabled'; } catch (e) {}
@@ -492,6 +493,9 @@
         var _mv = parseInt(lsGet('assSubMinReload', '3000'), 10); var MIN_RELOAD = isNaN(_mv) ? 3000 : _mv;    // floor on reparse rate; must stay < LEAD*1000
         var winCenter = -1e9, loadedUntil = -1e9, lastLoadAt = 0, loading = false;
         var forceReload = false;   // set by seek; cleared ONLY once a load actually commits
+        // The picture can start while a file's fonts are still downloading. Subtitles attach
+        // with the fonts there are and attach once more, quietly, when the rest are in.
+        var fontsIn = true, partial = false, again = false;
         var extKey = null, extGen = 0;   // EXTERNAL ('extra') sub: current selection id + async generation guard
         // On-demand fonts: OFF by default — Codex found it can drop an *unnamed* CJK
         // fallback attachment (-> tofu). Opt in with assFontDemand=1 once the lossless
@@ -533,7 +537,7 @@
                 if (ctl !== cur || window.__assSel !== requestedSelection || !ass || ass.length < 40) return;
                 var cover = coverOf(ass, ph == null ? 0 : ph);
                 if (cover < 0) { alog('tee: window empty at ph=' + ph + ' (demuxer behind) — not committing'); return; }
-                if (!attached) { var furls = fonts.map(function (n) { return '/ass/tfont?u=' + uq + '&f=' + encodeURIComponent(n); }); ctl.attach(ass, furls, avail); attached = true; subMsg('Subtitles ready', 1200); alog('tee attach trk=' + idx + ' len=' + ass.length + ' eager=' + furls.length + ' avail=' + (avail ? Object.keys(avail).length : 0)); }
+                if (!attached) { var furls = fonts.map(function (n) { return '/ass/tfont?u=' + uq + '&f=' + encodeURIComponent(n); }); ctl.attach(ass, furls, avail); attached = true; partial = !fontsIn; if (!again) subMsg('Subtitles ready', 1200); again = false; alog('tee attach trk=' + idx + ' len=' + ass.length + ' eager=' + furls.length + ' avail=' + (avail ? Object.keys(avail).length : 0)); }
                 else ctl.updateTrack(ass);
                 curIdx = idx; lastCount = count; forceReload = false;
                 if (ph != null) winCenter = ph;
@@ -578,6 +582,8 @@
                 if (ctl !== cur) return;
                 var idx = window.AssTrackMap ? window.AssTrackMap.resolve(window.__assSel, s.tracks || []) : selIdx();
                 if (idx < 0) { setTimeout(poll, 700); return; }
+                fontsIn = s.ready !== false;
+                if (attached && partial && fontsIn) { attached = false; again = true; alog('tee: fonts complete -> attach again'); }
                 if (DEMAND && s.fontEager) {                 // on-demand: eager list + name->url map
                     fonts = s.fontEager;
                     avail = {}; var _fa = s.fontAvail || {};

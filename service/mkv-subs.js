@@ -271,7 +271,9 @@ MkvSubDemux.prototype._parseStream = function () {
             if (!this._blockIsSub(this._sPending, dsLocal)) { this._sPos = deAbs; continue; }
         }
         if (szr.value > MAX_LEAF_BYTES) { this._sPos = deAbs; continue; }   // nothing we extract is this big; never buffer it
-        if (deAbs - this._sAbs > this._sPending.length) { this._sWant = deAbs - this._sAbs; break; }   // wait for full leaf data
+        // Wait for the whole leaf. What is held is counted from this element on: _trim()
+        // drops everything before it once the loop ends.
+        if (deAbs - this._sAbs > this._sPending.length) { this._sWant = deAbs - this._sPos; break; }
         this._leaf(idr.id, this._sPending, dsLocal, deAbs - this._sAbs);
         this._sPos = deAbs;
     }

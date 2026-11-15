@@ -14,6 +14,7 @@ var crypto = require('crypto');
 var PX = require('./ass-proxy.js');
 var M = require('./mkv-subs.js');
 var FI = require('./font-info.js');
+var Cut = require('./mkv-cut.js');
 
 var PORT = parseInt(process.env.ASS_TEE_PORT || '11474', 10);
 // Each session pins ~18 embedded fonts (multi-MB CJK) + all-track events in RAM,
@@ -37,6 +38,12 @@ var BOOTSTRAP_MAX_BYTES = parseInt(process.env.ASS_TEE_BOOTSTRAP_MAX_BYTES || '1
 var BOOTSTRAP_MAX_ATTEMPTS = parseInt(process.env.ASS_TEE_BOOTSTRAP_ATTEMPTS || '3', 10);
 var BOOTSTRAP_RETRY_MS = parseInt(process.env.ASS_TEE_BOOTSTRAP_RETRY_MS || '250', 10);
 var BOOTSTRAP_COOLDOWN_MS = parseInt(process.env.ASS_TEE_BOOTSTRAP_COOLDOWN_MS || '2000', 10);
+// The player's view of the file is planned from its first bytes (mkv-cut.js). Its requests
+// wait that long and no longer; an Attachments element not found in this much stays in.
+var CUT_HEAD_MAX = parseInt(process.env.ASS_TEE_CUT_HEAD_MAX || '8388608', 10);    // 8 MiB
+var CUT_WAIT_MS = parseInt(process.env.ASS_TEE_CUT_WAIT_MS || '8000', 10);
+var CUES_MAX = 16 * 1024 * 1024;
+var CUES_WAIT_MS = parseInt(process.env.ASS_TEE_CUES_WAIT_MS || '10000', 10);
 var sessions = {};
 
 function keyFor(u) { return crypto.createHash('sha1').update(String(u)).digest('hex').slice(0, 16); }
@@ -50,7 +57,8 @@ function Session(cdnUrl) {
     this.fonts = {};               // name -> Buffer
     this.fontNamesByFile = {};     // name -> [family/full names] (for on-demand loading)
     this.ready = false;            // header/track-list bootstrapped (subTracks seeded)
-    this.bootstrapDone = false;    // bootstrap finished (ready OR failed) — unblocks feeding
+    this.tracksIn = false;         // the track list is known (before `ready` when the fonts are cut from the view)
+    this.bootstrapDone = false;    // tracks in, or bootstrap failed — unblocks feeding
     this._doneCbs = [];            // callbacks waiting on bootstrapDone
     this._readyCbs = [];           // active range demuxers waiting for eventual recovery
     this.bootstrapRunning = false;
@@ -58,8 +66,14 @@ function Session(cdnUrl) {
     this.bootstrapLimitReached = false;
     this.nextBootstrapAt = 0;
     this._bootstrapTimer = null;
-    this.pinDone = false;          // resolver redirect followed and pinned (or failed once)
+    this.pinDone = false;          // resolver redirect followed and the player's view decided (or failed once)
     this._pinCbs = [];             // player requests wait here instead of racing /resolve
+    this.size = null;              // the file's real length
+    this.cut = undefined;          // the player's view: undefined until planned, null = the file as it is, else a mkv-cut plan
+    this._head = [];               // first bytes of the file, kept until the view is planned
+    this._headLength = 0; this._headPlanned = 0;
+    this.cues = null;              // { start, end, data }: the Cues element rewritten for a cut view
+    this._cuesCbs = null;
     this.refreshRunning = false;   // expired temporary CDN URL is refreshed single-flight
     this._refreshCbs = [];
     this.liveConns = 0;            // open tee connections (never evict while >0)
@@ -67,10 +81,16 @@ function Session(cdnUrl) {
     this.passthroughBytes = 0;     // bytes piped to the player without demuxing (no text subs)
     this.videoFps = null;          // exact fps from the container (video DefaultDuration)
     this.lastActivity = Date.now();
+    var self = this;
+    setTimeout(function () { self._finishPin(); }, CUT_WAIT_MS).unref();   // a stalled head must not hold the player
     this.ensureBootstrap();
 }
 Session.prototype._finishPin = function () {
     if (this.pinDone) return;
+    // Released before a view was planned: the player gets the file as it is. Decided
+    // once per session, because every offset the player uses afterwards depends on it.
+    if (this.cut === undefined) this.cut = null;
+    this._head = null;
     this.pinDone = true;
     var cbs = this._pinCbs; this._pinCbs = [];
     for (var i = 0; i < cbs.length; i++) { try { cbs[i](); } catch (e) {} }
@@ -192,23 +212,30 @@ Session.prototype._bootstrap = function () {
     function failed() {
         if (settled) return;
         settled = true;
+        self._finishPin();
         self._bootstrapFailed();
     }
+    if (self._head) { self._head = []; self._headLength = 0; self._headPlanned = 0; }
     PX.fetchRange(self.pinned, 'bytes=0-' + (BOOTSTRAP_MAX_BYTES - 1), function (err, up, finalUrl) {
         if (err || !up) { self._finishPin(); failed(); return; }
         if (finalUrl && finalUrl !== self.pinned && /^https?:/.test(finalUrl) && finalUrl.indexOf('/resolve/') < 0) self.pinned = finalUrl;
-        self._finishPin();
+        var total = /\/(\d+)\s*$/.exec(up.headers['content-range'] || '');
+        if (total) self.size = +total[1];
         up.on('data', function (c) {
             var remaining = BOOTSTRAP_MAX_BYTES - off;
             if (remaining <= 0) return;
             if (c.length > remaining) c = c.slice(0, remaining);
+            if (self._head) self._planView(c);
             try { hd.pushAt(off, c); } catch (e) {}
             off += c.length;
+            // With the fonts cut from the player's view the picture starts, and a resume reaches
+            // the middle of the file, while they are still coming in. The tracks are complete
+            // by then: list them, so dialogue shows at once and mid-file streams are read.
+            if (self.cut && !self.tracksIn && hd.tracks.length && hd._sPos >= self.cut.start) { self._adoptTracks(hd); self._finishBootstrap(); }
             if (hd._curCluster && !self.ready) {         // header+fonts done -> capture tracks
                 settled = true;
-                self.subTrackSet = hd.subTracks;
-                self.tracks = Object.keys(hd.subTracks).map(function (n) { return { number: +n, streamIndex: hd.subTracks[n].streamIndex, name: hd.subTracks[n].name, lang: hd.subTracks[n].lang, codecPrivate: hd.subTracks[n].codecPrivate }; }).sort(function (a, b) { return a.streamIndex - b.streamIndex || a.number - b.number; });
-                self.videoFps = hd.videoFps();               // exact container fps for sign frame-lock
+                if (self._head) self._planView();
+                self._adoptTracks(hd);
                 self.ready = true;
                 self.bootstrapRunning = false;
                 self.bootstrapAttempts = 0;
@@ -220,6 +247,7 @@ Session.prototype._bootstrap = function () {
                 // A malformed/pathological file must not make status polling
                 // redownload the same maximum-size prefix forever.
                 settled = true;
+                self._finishPin();
                 self.bootstrapRunning = false;
                 self.bootstrapAttempts = 0;
                 self.bootstrapLimitReached = true;
@@ -234,6 +262,71 @@ Session.prototype._bootstrap = function () {
         up.on('error', failed);
     });
 };
+Session.prototype._adoptTracks = function (hd) {
+    this.subTrackSet = hd.subTracks;
+    this.tracks = Object.keys(hd.subTracks).map(function (n) { return { number: +n, streamIndex: hd.subTracks[n].streamIndex, name: hd.subTracks[n].name, lang: hd.subTracks[n].lang, codecPrivate: hd.subTracks[n].codecPrivate }; }).sort(function (a, b) { return a.streamIndex - b.streamIndex || a.number - b.number; });
+    this.videoFps = hd.videoFps();               // exact container fps for sign frame-lock
+    this.tracksIn = true;
+};
+// Plan the player's view from the head of the file. The Attachments element's header
+// arrives long before its contents, so the player is released after a few KB while this
+// bootstrap carries on reading the fonts.
+// Without a chunk: the bootstrap has stopped reading, so decide with what is here.
+Session.prototype._planView = function (chunk) {
+    if (chunk) {
+        this._head.push(chunk); this._headLength += chunk.length;
+        if (this._headLength < this._headPlanned * 2 && this._headLength < CUT_HEAD_MAX) return;   // plan again once the head has doubled
+    }
+    this._headPlanned = this._headLength;
+    var head = Buffer.concat(this._head);
+    var plan = this.size ? Cut.plan(head) : null;
+    if (plan === undefined && chunk && this._headLength < CUT_HEAD_MAX) return;
+    if (plan && plan.start > CUT_HEAD_MAX) plan = null;
+    if (plan) { plan.raw = Buffer.from(head.slice(0, plan.start)); this.cut = plan; }
+    this._finishPin();
+    if (plan && plan.cuesAt != null) this.loadCues(function () {});     // the player's first seek asks for it: have it by then
+};
+// The Cues element of a cut view: fetched once, when the player first asks for it (its
+// first seek), and rewritten. cb(false) when it cannot be had.
+Session.prototype.loadCues = function (cb) {
+    var self = this, cut = this.cut;
+    if (this.cues) return cb(true);
+    if (this._cuesCbs) { this._cuesCbs.push(cb); return; }
+    var cbs = this._cuesCbs = [cb], upstream = null, settled = false;
+    // Every way out goes through here: a CDN that stalls or sends something else must not
+    // leave the fetch open or the waiting player requests hanging.
+    function done(ok) {
+        if (settled) return;
+        settled = true; clearTimeout(timer);
+        try { if (upstream) { upstream.resume(); upstream.destroy(); } } catch (e) {}
+        if (self._cuesCbs === cbs) self._cuesCbs = null;
+        cbs.forEach(function (f) { f(ok); });
+    }
+    var timer = setTimeout(function () { done(false); }, CUES_WAIT_MS);
+    this.fetchPlayerRange('bytes=' + cut.cuesAt + '-', function (err, up) {
+        upstream = up;
+        if (settled) { try { if (up) { up.resume(); up.destroy(); } } catch (e) {} return; }   // timed out before the CDN answered
+        if (err || !up || up.statusCode !== 206) return done(false);        // 200 would be the file from byte 0
+        var parts = [], length = 0, want = 0;
+        up.on('data', function (c) {
+            if (settled) return;
+            parts.push(c); length += c.length;
+            if (!want) {
+                var e = Cut.element(Buffer.concat(parts), 0);
+                if (!e && length < 16) return;                              // an element header is at most 12 bytes
+                if (!e || e.id !== Cut.ID.CUES || e.unknown || e.end > CUES_MAX) return done(false);
+                want = e.end;
+            }
+            if (length < want) return;
+            var data = Buffer.concat(parts).slice(0, want);
+            Cut.cues(data, cut, 0);
+            self.cues = { start: cut.cuesAt, end: cut.cuesAt + want, data: data };
+            done(true);
+        });
+        up.on('end', function () { done(false); });
+        up.on('error', function () { done(false); });
+    });
+};
 // Per-connection demuxer (concurrent-safe), demuxing all sub tracks. Seeded from
 // the bootstrapped track map when ready; a start-at-0 stream self-seeds from the
 // Tracks header in its own bytes so it does not need the seed.
@@ -244,7 +337,7 @@ Session.prototype.hasTextSubs = function () { return !this.ready || Object.keys(
 Session.prototype.newDemux = function () {
     var d = new M.MkvSubDemux(this._sink());
     d.allSubs = true;
-    if (this.ready) d.subTracks = this.subTrackSet;
+    if (this.tracksIn) d.subTracks = this.subTrackSet;
     return d;
 };
 Session.prototype.list = function () {
@@ -351,7 +444,7 @@ var tee = http.createServer(function (req, res) {
     var cdnUrl = decodeURIComponent(m[1]);
     var sess = ensure(cdnUrl);
     var range = req.headers.range || '';
-    var rm = /bytes=(\d+)-/.exec(range);
+    var rm = /bytes=(\d+)-(\d*)/.exec(range);
     var start = rm ? parseInt(rm[1], 10) : 0;
     // The demuxer only yields subtitles once its subTracks map exists. A stream
     // starting at byte 0 carries the Tracks header and self-seeds, so it can demux
@@ -370,7 +463,7 @@ var tee = http.createServer(function (req, res) {
     if (start === 0) makeDemux();
     else sess.whenBootstrapDone(function () {
         if (!demux) makeDemux();
-        else if (sess.ready) { demux.subTracks = sess.subTrackSet; }   // seed a demuxer forced early by pre-buffer overflow
+        else if (sess.tracksIn) { demux.subTracks = sess.subTrackSet; }   // seed a demuxer forced early by pre-buffer overflow
     });
     var cancelReady = sess.whenReady(function () {
         if (closed) return;
@@ -389,13 +482,9 @@ var tee = http.createServer(function (req, res) {
     var clientGone = false;
     function onClientGone() { clientGone = true; closeConn(); }
     res.on('close', onClientGone); res.on('error', onClientGone); req.on('aborted', onClientGone);
-    sess.whenPinned(function () { sess.fetchPlayerRange(range, function (err, up, finalUrl) {
-        if (clientGone) { try { if (up) { up.resume(); up.destroy(); } } catch (e) {} return; }
-        if (err || !up) { closeConn(); try { res.writeHead(502); res.end(); } catch (e) {} return; }
-        var h = {};
-        ['content-length', 'content-range', 'accept-ranges', 'content-type'].forEach(function (k) { if (up.headers[k]) h[k] = up.headers[k]; });
-        try { res.writeHead(up.statusCode, h); } catch (e) { closeConn(); try { up.destroy(); } catch (x) {} return; }
-        var off = start;
+    // One upstream response into the player. Bytes reach the demuxer at their real offset
+    // and the player under bounded read-ahead; `done` gets the offset the response ended at.
+    function pipe(up, off, done) {
         var pending = 0, paused = false;
         var conn = { up: up, res: res, sess: sess, paused: false, progressAt: _now() };
         live.push(conn);
@@ -408,6 +497,7 @@ var tee = http.createServer(function (req, res) {
         //                        then runs dry and subs vanish mid-episode.
         // So: allow up to READAHEAD_CAP bytes in flight, resume at half (hysteresis, to
         // avoid pause/resume churn every 16KB). Memory bounded; demuxer keeps a lead.
+        function unregister() { var i = live.indexOf(conn); if (i >= 0) live.splice(i, 1); }
         function stopUpstream() { closeConn(); unregister(); try { up.destroy(); } catch (e) {} }
         function wrote(n) { return function (err) {
             if (err || clientGone) { stopUpstream(); return; }
@@ -427,11 +517,61 @@ var tee = http.createServer(function (req, res) {
                 if (pending > READAHEAD_CAP && !paused) { paused = true; conn.paused = true; up.pause(); }
             } catch (e) {}
         });
-        function unregister() { var i = live.indexOf(conn); if (i >= 0) live.splice(i, 1); }
-        up.on('end', function () { sess.lastActivity = Date.now(); unregister(); try { res.end(); } catch (e) {} });
+        up.on('end', function () { sess.lastActivity = Date.now(); unregister(); res.removeListener('close', stopUpstream); done(off); });
         up.on('error', function () { unregister(); try { res.end(); } catch (e) {} });
         res.on('close', stopUpstream);
-    }); });
+    }
+    function finish() { try { res.end(); } catch (e) {} }
+    function refuse(up) { closeConn(); try { if (up) { up.resume(); up.destroy(); } } catch (e) {} try { res.destroy(); } catch (e) {} }
+    // The file as it is: the CDN's own status and headers.
+    function whole() {
+        sess.fetchPlayerRange(range, function (err, up) {
+            if (clientGone) { try { if (up) { up.resume(); up.destroy(); } } catch (e) {} return; }
+            if (err || !up) { closeConn(); try { res.writeHead(502); res.end(); } catch (e) {} return; }
+            var h = {};
+            ['content-length', 'content-range', 'accept-ranges', 'content-type'].forEach(function (k) { if (up.headers[k]) h[k] = up.headers[k]; });
+            try { res.writeHead(up.statusCode, h); } catch (e) { closeConn(); try { up.destroy(); } catch (x) {} return; }
+            pipe(up, start, finish);
+        });
+    }
+    // The file without its Attachments element (mkv-cut.js). The player's offsets are
+    // this view's; what is fetched and demuxed keeps the file's real offsets.
+    function cutView(cut) {
+        var total = sess.size - cut.cut;
+        var last = rm && rm[2] ? Math.min(parseInt(rm[2], 10), total - 1) : total - 1;
+        if (start > last) { closeConn(); try { res.writeHead(416, { 'content-range': 'bytes */' + total }); res.end(); } catch (e) {} return; }
+        var h = { 'content-type': 'video/x-matroska', 'accept-ranges': 'bytes', 'content-length': last - start + 1 };
+        // A Range form this does not read (a suffix, several ranges) gets the whole view, as HTTP allows.
+        if (rm) h['content-range'] = 'bytes ' + start + '-' + last + '/' + total;
+        try { res.writeHead(rm ? 206 : 200, h); } catch (e) { closeConn(); return; }
+        if (start < cut.start) {
+            if (demux && start === 0) { try { demux.pushAt(0, cut.raw); } catch (e) {} }      // the tracks: the demuxer never sees them otherwise
+            res.write(cut.head.slice(start, Math.min(cut.start, last + 1)));
+        }
+        if (last < cut.start) return finish();
+        var end = last + cut.cut;                                    // real offset of the last byte wanted
+        (function next(pos) {
+            if (clientGone) return;
+            if (pos > end) return finish();
+            if (cut.cuesAt != null && pos >= cut.cuesAt && (!sess.cues || pos < sess.cues.end)) {
+                if (!sess.cues) return sess.loadCues(function (ok) { if (ok) next(pos); else refuse(); });
+                res.write(sess.cues.data.slice(pos - sess.cues.start, Math.min(sess.cues.end, end + 1) - sess.cues.start));
+                return next(sess.cues.end);
+            }
+            var stop = cut.cuesAt != null && pos < cut.cuesAt ? Math.min(end, cut.cuesAt - 1) : end;
+            sess.fetchPlayerRange('bytes=' + pos + '-' + stop, function (err, up) {
+                if (clientGone) { try { if (up) { up.resume(); up.destroy(); } } catch (e) {} return; }
+                if (err || !up || up.statusCode !== 206) return refuse(up);                // 200 would be the file from byte 0
+                // A response that ends early must end the player's too: carrying on would
+                // hand it a stream with a hole in it.
+                pipe(up, pos, function (reached) { if (reached === stop + 1) next(stop + 1); else refuse(); });
+            });
+        })(Math.max(start, cut.start) + cut.cut);
+    }
+    sess.whenPinned(function () {
+        if (clientGone) return;
+        if (sess.cut) cutView(sess.cut); else whole();
+    });
 });
 tee.on('clientError', function (e, sock) { try { sock.destroy(); } catch (x) {} });
 try { tee.listen(PORT, '127.0.0.1'); } catch (e) {}

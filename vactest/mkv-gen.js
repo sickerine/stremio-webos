@@ -41,6 +41,8 @@ var ID = {
     CODECPRIVATE: 0x63a2, LANGUAGE: 0x22b59c, NAME: 0x536e, DEFAULTDURATION: 0x23e383,
     ATTACHMENTS: 0x1941a469, ATTACHEDFILE: 0x61a7, FILENAME: 0x466e, FILEMIME: 0x4660, FILEDATA: 0x465c, FILEUID: 0x46ae,
     VOID: 0xec, CLUSTER: 0x1f43b675, TIMESTAMP: 0xe7, SIMPLEBLOCK: 0xa3, BLOCKGROUP: 0xa0, BLOCK: 0xa1, BLOCKDURATION: 0x9b,
+    SEEKHEAD: 0x114d9b74, SEEK: 0x4dbb, SEEKID: 0x53ab, SEEKPOSITION: 0x53ac, CUES: 0x1c53bb6b, CUEPOINT: 0xbb, CUETIME: 0xb3,
+    CUETRACKPOSITIONS: 0xb7, CUETRACK: 0xf7, CUECLUSTERPOSITION: 0xf1, TAGS: 0x1254c367, CRC32: 0xbf,
 };
 
 var ASS_HEADER = [
@@ -119,6 +121,12 @@ function build(opts) {
         })));
     }
     if (opts.headerPaddingBytes > 0) headerParts.push(el(ID.VOID, Buffer.alloc(opts.headerPaddingBytes)));
+    // opts.index: a SeekHead listing the Cues, which follow the last Cluster (as mkvmerge writes them).
+    // Positions count from the start of the Segment's data and keep one width, so sizes do not move.
+    var position = function (value) { var data = Buffer.alloc(4); data.writeUInt32BE(value); return data; };
+    var seekHead = function (cuesAt) { return master(ID.SEEKHEAD, [master(ID.SEEK, [el(ID.SEEKID, idBuf(ID.CUES)), el(ID.SEEKPOSITION, position(cuesAt))])]); };
+    var firstCluster = Buffer.concat(headerParts.slice(3)).length + (opts.index ? seekHead(0).length : 0);
+    if (opts.index) headerParts.splice(3, 0, seekHead(firstCluster + durSec * BPS));
     var header = Buffer.concat(headerParts);
 
     // pre-bucket events into the cluster (== second) that contains their start
@@ -158,9 +166,18 @@ function build(opts) {
         if (cluster.length !== BPS) throw new Error('cluster ' + c + ' is ' + cluster.length + ' not ' + BPS);
         fs.writeSync(fd, cluster);
     }
+    var cues = Buffer.alloc(0);
+    if (opts.index) {
+        var points = [];
+        for (var n = 0; n < durSec; n++) points.push(master(ID.CUEPOINT, [elU(ID.CUETIME, n * 1000),
+            master(ID.CUETRACKPOSITIONS, [elU(ID.CUETRACK, 1), el(ID.CUECLUSTERPOSITION, position(firstCluster + n * BPS))])]));
+        cues = master(ID.CUES, points);
+        fs.writeSync(fd, cues);
+    }
     fs.closeSync(fd);
 
-    return { path: opts.path, size: header.length + durSec * BPS, headerLen: header.length, bytesPerSec: BPS, durSec: durSec, events: events };
+    return { path: opts.path, size: header.length + durSec * BPS + cues.length, headerLen: header.length, bytesPerSec: BPS, durSec: durSec, events: events };
 }
 
-module.exports = { build: build, genEvents: genEvents, ASS_HEADER: ASS_HEADER };
+module.exports = { build: build, genEvents: genEvents, ASS_HEADER: ASS_HEADER,
+    ID: ID, idBuf: idBuf, vint: vint, el: el, elU: elU, elS: elS, master: master };
