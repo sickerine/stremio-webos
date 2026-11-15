@@ -37,3 +37,15 @@ test("no password configured: everything stays open", async () => {
   try { assert.equal((await fetch(`${base}/status`)).status, 200); assert.equal(await wsResult(`${base.replace("http", "ws")}/ws?role=viewer&room=home`), "open"); }
   finally { await s.close(); }
 });
+
+test("/tv/screenshot: behind the password, returns the inspector's PNG", async () => {
+  const png = Buffer.from("89504e470d0a1a0a", "hex");
+  const { s, base } = await start({ password: "open-sesame", tvScreenshot: async () => png });
+  try {
+    assert.equal((await fetch(`${base}/tv/screenshot`)).status, 401);
+    const cookie = `watch_auth=${(await import("node:crypto")).createHash("sha256").update("watch-web cookie:open-sesame").digest("hex")}`;
+    const r = await fetch(`${base}/tv/screenshot`, { headers: { cookie } });
+    assert.equal(r.status, 200); assert.equal(r.headers.get("content-type"), "image/png");
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), png);
+  } finally { s.close(); }
+});

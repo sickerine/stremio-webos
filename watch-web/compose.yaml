@@ -5,6 +5,8 @@ services:
     build: .
     container_name: stremio-watch-web
     init: true
+    volumes:
+      - ./comparison-media:/app/comparison-media:ro
     ports:
       - "3211:3211"   # the TV bridge already targets this port; browsers use it too
     environment:
@@ -15,8 +17,10 @@ services:
       WATCH_PASSWORD: ${WATCH_PASSWORD:-}
       # Key the TV must send as ?key= in its relay URL (set in .env). Empty = any client may act as the TV.
       TV_KEY: ${TV_KEY:-}
-    cpus: 0.5
-    mem_limit: 256m
+      # webOS inspector of the TV app (dev mode) for GET /tv/screenshot.
+      TV_INSPECTOR: ${TV_INSPECTOR:-192.168.1.37:9998}
+    cpus: 2        # a 4K HEVC frame grab takes ~13s at 2 cpus
+    mem_limit: 1g  # 4K HEVC decode + tone-map for /tv/screenshot
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3211/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s

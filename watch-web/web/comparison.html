@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dolby Vision and HDR10</title>
+    <script type="module" src="/src/comparison.js"></script>
+  </head>
+  <body>
+    <main>
+      <header><h1>Dolby Vision file</h1><h1>HDR10 file</h1></header>
+      <div class="comparison-area">
+        <div class="comparison-stage" role="slider" tabindex="0" aria-label="Comparison split"
+          aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"
+          aria-valuetext="50% Dolby Vision, 50% HDR10" aria-orientation="horizontal">
+          <video class="right-video" aria-label="HDR10 file" playsinline muted preload="auto"></video>
+          <video class="left-video" aria-label="Dolby Vision file" playsinline muted preload="auto"></video>
+          <div class="comparison-divider" aria-hidden="true">
+            <div class="comparison-handle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                <path d="m8 7-5 5 5 5m8-10 5 5-5 5M12 4v16"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p id="comparison-status" role="status">Loading comparison frame</p>
+    </main>
+  </body>
+</html>

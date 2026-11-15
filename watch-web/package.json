@@ -25,6 +25,7 @@
     "matroska-subtitles": "^3.3.2",
     "media-chrome": "^4.19.2",
     "mediabunny": "^1.66.0",
+    "send": "1.2.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {

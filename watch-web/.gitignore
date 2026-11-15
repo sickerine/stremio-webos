@@ -3,3 +3,4 @@ dist/
 web/public/
 .env
 cloudflared/
+comparison-media/

@@ -1,18 +1,18 @@
-# The relay is pure Node: it resolves redirects and relays TV state. No media, no
-# ffmpeg. The browser does all the media work, so this image is tiny.
-# node:22-slim (glibc), and we install without the host lockfile so npm fetches the
-# container's own platform-native optional deps (rolldown/vite binding).
+# The browser handles movie streams; the relay also serves mounted comparison
+# clips. Install the tested dependency versions, including Linux optional deps.
 FROM node:22-slim AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
 FROM node:22-slim
+# ffmpeg grabs the TV's current frame for /tv/screenshot (Debian build has zscale + tonemap).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
 COPY server ./server
 COPY shared ./shared
 COPY --from=build /app/dist ./dist

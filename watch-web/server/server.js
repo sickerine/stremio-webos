@@ -1,15 +1,17 @@
 // The only server-side piece: a TV-state relay, a redirect resolver, and static files.
-// No media touches this process. Browsers fetch the stream from the CDN themselves.
+// Movie streams go directly to the CDN; only the short comparison clips live here.
 import http from "node:http";
 import https from "node:https";
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { execFile } from "node:child_process";
 import { bestOffset, INITIAL_CLOCK_SAMPLES, CLOCK_BURST_GAP_MS } from "../shared/clock.js";
 import { loginPage } from "./login.js";
 import { vlcPage } from "./vlc-page.js";
+import sendFile from "send";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 // Watching in VLC on Windows: the follower script as a file a viewer downloads and
@@ -21,8 +23,8 @@ const VLC_FOLLOWER_VERSION = createHash("sha1").update(VLC_FOLLOWER).digest("hex
 const vlcLauncher = ({ relay, token, room }) => ["<# :", "@echo off", 'copy /y "%~f0" "%TEMP%\\watch-party-vlc.ps1" >nul',
   'powershell -NoProfile -ExecutionPolicy Bypass -File "%TEMP%\\watch-party-vlc.ps1"', "if errorlevel 1 pause", "exit /b", "#>",
   `$Relay = '${relay}'`, `$Token = '${token}'`, `$Room = '${room}'`, `$Version = '${VLC_FOLLOWER_VERSION}'`, VLC_FOLLOWER].join("\n").replace(/\r?\n/g, "\r\n");
-const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
-  ".wasm": "application/wasm", ".woff2": "font/woff2", ".json": "application/json", ".svg": "image/svg+xml", ".map": "application/json" };
+const COMPARISON_MEDIA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../comparison-media");
+const COMPARISON_FILES = new Set(["dolby-vision.mp4", "hdr10.mp4"]);
 
 export function normalizeState(c, clockOffsetMs = 0, receivedAtMs = Date.now()) {
   if (!c || typeof c !== "object") return null;
@@ -62,6 +64,49 @@ export function resolveRedirects(url, { fetchHead = headRequest, maxHops = 6 } =
   })();
 }
 
+// "Screenshot" of the TV. webOS draws video on a hardware plane the browser never sees,
+// so while something plays we pull that frame from the CDN at the TV's position with
+// ffmpeg (tone-mapped to SDR when the stream is HDR). With nothing playing, fall back
+// to a page capture over the webOS inspector (dev mode, port 9998): UI only.
+const TV_INSPECTOR = process.env.TV_INSPECTOR || "192.168.1.37:9998";
+const HDR_TO_SDR = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,";
+const run = (cmd, args, ms) => new Promise((ok, bad) => execFile(cmd, args, { timeout: ms, maxBuffer: 64 << 20, encoding: "buffer" }, (e, out, err) => e ? bad(new Error(`${cmd}: ${String(err).trim().split("\n").pop() || e.message}`)) : ok(out)));
+async function cdp(host, method, params) {
+  const targets = await (await fetch(`http://${host}/json`)).json();
+  const page = targets.find(t => t.type === "page" && t.webSocketDebuggerUrl);
+  if (!page) throw new Error("no inspectable page (is the app running?)");
+  const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
+  try {
+    await new Promise((ok, bad) => { ws.once("open", ok); ws.once("error", bad); });
+    ws.send(JSON.stringify({ id: 1, method, params }));
+    const m = await new Promise((ok, bad) => { ws.on("message", d => { const m = JSON.parse(d); if (m.id === 1) ok(m); }); setTimeout(() => bad(new Error("inspector timeout")), 15000); });
+    if (m.error) throw new Error(m.error.message);
+    return m.result;
+  } finally { ws.close(); }
+}
+// A paused resume (app relaunch, nothing played yet) leaves the panel on the keyframe
+// before the reported position, not the exact frame. Ask the page; unreachable = exact.
+const tvNeverPlayed = host => cdp(host, "Runtime.evaluate", { expression: "(v=>!!v&&v.played.length===0)(document.querySelector('video'))", returnByValue: true }).then(r => r.result.value === true, () => false);
+async function captureTvFrame(room, host) {
+  const url = room.cdnUrl || room.state.mediaUrl, s = room.state;
+  const pos = s.positionSeconds + (s.paused ? 0 : (Date.now() - s.receivedAtMs) / 1000 * (s.playbackRate || 1));
+  const [transfer, snap] = await Promise.all([
+    run("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=color_transfer", "-of", "csv=p=0", url], 20000).then(String),
+    s.paused && tvNeverPlayed(host),
+  ]);
+  // Last keyframe at or before pos. ffmpeg's -noaccurate_seek still decodes up to pos on this demuxer, so find it ourselves.
+  const keyframes = !snap ? [] : String(await run("ffprobe", ["-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey", "-read_intervals", `${Math.max(0, pos - 30)}%${pos}`, "-show_entries", "frame=pts_time", "-of", "csv=p=0", url], 30000)).match(/[\d.]+/g)?.map(Number).filter(t => t <= pos) || [];
+  const seekTo = keyframes.length ? keyframes[keyframes.length - 1] : pos;
+  const vf = "scale=1920:-2," + (/smpte2084|arib-std-b67/.test(transfer) ? HDR_TO_SDR : "") + "format=rgb24";
+  return run("ffmpeg", ["-v", "error", "-ss", seekTo.toFixed(3), "-i", url, "-frames:v", "1", "-vf", vf, "-f", "image2pipe", "-c:v", "png", "pipe:1"], 50000);
+}
+
+async function captureTvScreenshot(room, host = TV_INSPECTOR) {
+  if (room?.state && (room.cdnUrl || room.state.mediaUrl)) return captureTvFrame(room, host);
+  const png = await cdp(host, "Page.captureScreenshot", { format: "png" });
+  return Buffer.from(png.data, "base64");
+}
+
 function headRequest(url) {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith("https:") ? https : http;
@@ -82,7 +127,7 @@ function headRequest(url) {
 // checked against TV_KEY, which the TV sends as ?key= in the relay URL stored on it.
 const COOKIE = "watch_auth";
 const digest = s => createHash("sha256").update(s).digest();
-export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST, staleMs = 6000, password = process.env.WATCH_PASSWORD || "", tvKey = process.env.TV_KEY || "" } = {}) {
+export function createRelayServer({ resolve = resolveRedirects, tvScreenshot = captureTvScreenshot, distRoot = DIST, comparisonRoot = COMPARISON_MEDIA, staleMs = 6000, password = process.env.WATCH_PASSWORD || "", tvKey = process.env.TV_KEY || "" } = {}) {
   const token = password ? digest(`watch-web cookie:${password}`).toString("hex") : null;
   const authed = req => !token || (req.headers.cookie || "").split(/;\s*/).includes(`${COOKIE}=${token}`);
   const passwordOk = given => typeof given === "string" && timingSafeEqual(digest(given), digest(password));
@@ -131,6 +176,12 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
       if (req.method === "GET" && (req.headers.accept || "").includes("text/html")) { res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); res.end(loginPage({ next: url.pathname + url.search })); return; }
       res.writeHead(401, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: false, error: "password required" })); return;
     }
+    if (req.method === "GET" && url.pathname === "/tv/screenshot") {
+      const room = [...rooms.values()].find(r => r.state);
+      try { const png = await tvScreenshot(room); res.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" }); res.end(png); }
+      catch (e) { res.writeHead(502, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: false, error: e.message })); }
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/vlc") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       res.end(vlcPage({ room: roomOf(url), windows: /Windows/.test(req.headers["user-agent"] || "") })); return;
@@ -149,20 +200,25 @@ export function createRelayServer({ resolve = resolveRedirects, distRoot = DIST,
       }
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ ok: true, rooms: out })); return;
     }
-    // static (built by vite into ../dist)
-    if (req.method === "GET") {
-      let p = decodeURIComponent(url.pathname);
-      if (p === "/" || !path.extname(p)) p = "/index.html";
-      const file = path.join(distRoot, p);
-      if (file.startsWith(distRoot) && existsSync(file) && statSync(file).isFile()) {
-        const ext = path.extname(file);
-        // Optional cross-origin isolation (ISOLATE=1) so jassub can use SharedArrayBuffer
-        // threads. CDN fetches are CORS responses, so they stay allowed under COEP.
-        const iso = process.env.ISOLATE === "1" ? { "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp" } : {};
-        res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream",
-          "cache-control": p === "/index.html" ? "no-store" : "public, max-age=31536000, immutable", ...iso });
-        createReadStream(file).pipe(res); return;
+    // One file sender handles built assets and the comparison clips, including
+    // byte ranges, conditional requests and HEAD for native browser seeking.
+    if (req.method === "GET" || req.method === "HEAD") {
+      let p = url.pathname, root = distRoot;
+      const media = p.startsWith("/comparison/media/");
+      if (media) {
+        p = p.slice("/comparison/media/".length);
+        if (!COMPARISON_FILES.has(p)) { res.writeHead(404); res.end("Not found"); return; }
+        root = comparisonRoot;
+      } else if (p === "/comparison" || p === "/comparison/") p = "/comparison.html";
+      else if (p === "/" || !path.extname(p)) p = "/index.html";
+      res.setHeader("cache-control", media ? "private, max-age=3600" : p.endsWith(".html") ? "no-store" : "public, max-age=31536000, immutable");
+      // Same-origin clips work under the same optional isolation as Watch.
+      if (process.env.ISOLATE === "1") {
+        res.setHeader("cross-origin-opener-policy", "same-origin");
+        res.setHeader("cross-origin-embedder-policy", "require-corp");
       }
+      sendFile(req, p, { root, cacheControl: false, dotfiles: "ignore", index: false }).pipe(res);
+      return;
     }
     res.writeHead(404); res.end("Not found");
   });

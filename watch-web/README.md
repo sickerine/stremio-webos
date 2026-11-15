@@ -27,7 +27,7 @@ LG TV ──(play/pause/seek/position)──► relay ──(WebSocket)──►
 - **Follow the TV**: position only. A stalled TV never pauses the browser.
 - **The relay** (`server/`): resolves the torrentio → TorBox → CDN redirect chain
   once (the middle hop has no CORS header, so a page can't) and relays TV state.
-  No media passes through it.
+  Movie streams bypass it; the short comparison clips are served locally.
 
 ## What works (verified against real TorBox streams)
 
@@ -88,6 +88,29 @@ node scripts/tv-sim.mjs                      # a TV simulator (URL=... POS=... P
 node scripts/pw-diag.mjs <url> [s] [chromium|firefox]   # browser diagnostics
 npm run build && node scripts/pw-e2e.mjs    # a real browser follows a fake TV: sound, a skip, a flickering start (needs ffmpeg)
 ```
+
+## HDR comparison
+
+`/comparison` shows a draggable Dolby Vision/HDR10 comparison, with both videos
+paused at 32.089 seconds. It uses the existing site password and does not join the
+TV relay or change playback. Native browser HEVC support is required; a Dolby
+Vision filename does not guarantee that a browser applies Dolby metadata.
+
+Place the matched clips at `comparison-media/dolby-vision.mp4` and
+`comparison-media/hdr10.mp4`. Docker mounts that directory read-only; the clips
+are excluded from Git and the image. The deployed clips share the same encoded
+picture, with Dolby metadata retained in the first and removed from the second.
+The server supports byte-range requests so browsers can seek without fetching
+the entire clip. Replacing clips also requires checking that 32.089 seconds
+selects the same frame in both files.
+
+## TV screenshot
+
+`GET /tv/screenshot` (password cookie required) returns a PNG of what the TV is showing.
+While something plays it is the frame at the TV's position, pulled from the CDN with
+ffmpeg and tone-mapped to SDR for HDR streams (about 13 s for 4K HEVC; no subtitles or
+UI). With nothing playing it is a capture of the app page over the webOS inspector
+(`TV_INSPECTOR`, default `192.168.1.37:9998`), which cannot see the video plane.
 
 ## Watch in VLC (Windows)
 
