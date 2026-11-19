@@ -3,9 +3,11 @@
 // viewer's picture is and where the TV is are written down. A viewer that shows the same stretch
 // twice though the TV never went back over it has "looped".
 // Needs a build (`npm run build`) and ffmpeg.
-//   node scripts/pw-seeks.mjs [clean|early]     CHROME=<path> as in pw-e2e.mjs
+//   node scripts/pw-seeks.mjs [clean|keyframe|early]     CHROME=<path> as in pw-e2e.mjs
 //   clean  the TV says "loading" at the new place until its seek has landed, then plays on (what a
 //          TV should say)
+//   keyframe  the same, and the picture lands 2.5 s before the place asked for, on a keyframe, which
+//          the TV says before it plays on (what the LG says through Seimio)
 //   early  the TV says it is playing at the new place at once, and where it really is a while later:
 //          behind, by as long as its seek took to land
 import { execFileSync } from "node:child_process";
@@ -41,6 +43,8 @@ const marks = [];
 for (const step of steps) {
   marks.push({ at: Date.now() - began, step });
   if (mode === "clean") await tv.skip(step, landMs);
+  // loading at the place asked for, then at the keyframe before it where the picture landed, then playing
+  else if (mode === "keyframe") { tv.setLoading(true); await tv.skip(step, 0); await sleep(landMs); await tv.skip(-2.5, 0); tv.setLoading(false); }
   else { await tv.skip(step, 0); await sleep(landMs); await tv.skip(-landMs / 1000, 0); }      // "playing there" at once; where it landed, later
   await sleep(1600 - landMs);
 }

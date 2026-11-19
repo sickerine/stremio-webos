@@ -27,6 +27,13 @@ await relay.listen(0, "127.0.0.1");
 const origin = `http://127.0.0.1:${relay.address().port}`;
 
 const tvFor = (room, file) => fakeTv({ origin, room, mediaUrl: `http://127.0.0.1:${mediaPort}/${file}`, title: file, position: 20 });
+// What the room is told of its viewers, as the TV app hears it: each `ready` the relay passed on, in order.
+import { WebSocket } from "ws";
+const roomOf = room => {
+  const said = [], socket = new WebSocket(`${origin.replace("http", "ws")}/ws?role=tv&room=${room}`);
+  socket.on("message", data => { const m = JSON.parse(data); if ((m.type === "room-viewers" || m.type === "hello") && m.viewers?.length) said.push(m.viewers[0].ready); });
+  return { said, close: () => socket.close() };
+};
 
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || undefined, args: ["--autoplay-policy=no-user-gesture-required"] });
 const look = page => page.evaluate(() => {
@@ -48,13 +55,18 @@ try {
   for (const file of Object.keys(files)) {
     // Follow the TV, with sound, through a skip.
     const name = path.parse(file).name;
-    const room = `play-${name}`, tv = tvFor(room, file), page = await browser.newPage();
+    const room = `play-${name}`, tv = tvFor(room, file), heard = roomOf(room), page = await browser.newPage();
     await tv.ready; await page.goto(`${origin}/?room=${room}`);
     const first = await inSync(page, 30, `${file} start`);
     await sleep(2000);
     assert.ok((await look(page)).audioBytes > first.audioBytes, `${file}: no sound is being decoded`);
+    // The TV app waits for this: the page says it is loading, then that it can play. (Through a skip
+    // into what it has buffered already it can play all along, and says nothing new.)
+    assert.deepEqual([heard.said.includes(false), heard.said.at(-1)], [true, true], `${file}: the room heard ${JSON.stringify(heard.said)} of the viewer as it started`);
     await tv.skip(40); await inSync(page, 20, `${file} after a 40 s skip`);
-    tv.close(); await page.close();
+    await sleep(600);
+    assert.equal(heard.said.at(-1), true, `${file}: the room heard ${JSON.stringify(heard.said)} of the viewer through a skip`);
+    tv.close(); heard.close(); await page.close();
 
     // The TV pauses and resumes again and again while the viewer is still starting.
     const flickerRoom = `flicker-${name}`, flicker = tvFor(flickerRoom, file), late = await browser.newPage();

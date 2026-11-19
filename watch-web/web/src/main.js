@@ -336,6 +336,10 @@ const relay = connectRelay({
     // a noisy clock sample must not trigger a multi-second sequence of seeks.
     if (!tvState || tvState.sessionId !== state.sessionId ||
         ["play", "seeked", "ratechange"].includes(state.event)) pendingCorrection = { sessionId: state.sessionId, sequence: state.sequence };
+    // Something new on the TV: the room hears that this browser is loading it now, not at the report's
+    // next turn. The TV waits for whoever is loading, and a tab in the background runs its timers once a
+    // second: a viewer heard from that late had the TV start without it.
+    if (!tvState || tvState.sessionId !== state.sessionId) { said = `${state.sessionId} false`; relay.send({ type: "status", sessionId: state.sessionId, ready: false }); }
     const buffering = state.buffering;
     tvState = { ...state, sampledAtMs, arrivedAtMs: now };
     if ((state.paused || buffering) && session && !session.pipeline.priming) video.pause();
