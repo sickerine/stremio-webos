@@ -141,14 +141,20 @@ export function createRelayServer({ resolve = resolveRedirects, tvScreenshot = c
   const roomOf = url => { const room = url.searchParams.get("room") || "home"; return /^[a-z0-9_-]{1,64}$/i.test(room) ? room : "home"; };
   const safeNext = n => (typeof n === "string" && /^\/(?!\/)/.test(n) ? n : "/");
   const rooms = new Map();
-  const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null }); return rooms.get(id); };
+  const roomFor = id => { if (!rooms.has(id)) rooms.set(id, { clients: new Set(), state: null, cdnUrl: null, size: null, resolving: null, resolveError: null, viewerCount: 0, roster: "[]" }); return rooms.get(id); };
   const send = (s, m) => { if (s.readyState === WebSocket.OPEN) s.send(JSON.stringify(m)); };
   const broadcast = (room, m) => { for (const c of room.clients) send(c, m); };
+  // Who is watching, for the TV to draw and to wait for as something starts: one entry a viewer, with
+  // whether it can play what the TV has now. `ready` is null until that viewer has said either way (a
+  // player from before this message existed), and false for a viewer that last spoke of something else.
+  const viewersOf = room => [...room.clients].filter(c => c.watchRole === "viewer").map(c => ({ id: c.viewerId,
+    ready: c.viewerStatus ? c.viewerStatus.ready && c.viewerStatus.sessionId === room.state?.sessionId : null }));
+  const tellViewers = room => { const viewers = viewersOf(room), now = JSON.stringify(viewers); if (now !== room.roster) { room.roster = now; broadcast(room, { type: "room-viewers", viewers }); } };
   // The hashed bundle path in dist/index.html identifies this build. It rides on
   // `hello`, so a tab left open across a deploy reloads instead of running old code.
   let build = null;
   try { build = /\/assets\/index-[\w-]+\.js/.exec(readFileSync(path.join(distRoot, "index.html"), "utf8"))?.[0] ?? null; } catch {}
-  const goIdle = (room, event = { sampledAtMs: Date.now(), event: "disconnected" }) => { room.state = null; room.cdnUrl = null; room.size = null; room.resolving = null; room.resolveError = null; broadcast(room, { type: "room-idle", ...event }); };
+  const goIdle = (room, event = { sampledAtMs: Date.now(), event: "disconnected" }) => { room.state = null; room.cdnUrl = null; room.size = null; room.resolving = null; room.resolveError = null; broadcast(room, { type: "room-idle", ...event }); tellViewers(room); };
 
   // The TV heartbeats every 500ms while it has media. If a room's last sample is
   // older than staleMs the TV is gone (relaunched, crashed, unplugged): its own idle
@@ -238,8 +244,10 @@ export function createRelayServer({ resolve = resolveRedirects, tvScreenshot = c
   wss.on("connection", (socket, { roomId, role }) => {
     const room = roomFor(roomId);
     socket.watchRole = role;
+    if (role === "viewer") socket.viewerId = ++room.viewerCount;
     room.clients.add(socket);
-    send(socket, { type: "hello", role, room: roomId, build, follower: VLC_FOLLOWER_VERSION, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });
+    send(socket, { type: "hello", role, room: roomId, build, follower: VLC_FOLLOWER_VERSION, state: room.state, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null, viewers: viewersOf(room) });
+    tellViewers(room);
     let clockOffset = null, clockTimer = null, probeCount = 0, pending = null;
     const clockSamples = [], probes = new Set();
     const probe = () => {
@@ -249,13 +257,18 @@ export function createRelayServer({ resolve = resolveRedirects, tvScreenshot = c
       clockTimer = setTimeout(probe, ++probeCount < INITIAL_CLOCK_SAMPLES ? CLOCK_BURST_GAP_MS : 10000);
       clockTimer.unref?.();
     };
-    socket.on("close", () => { clearTimeout(clockTimer); room.clients.delete(socket); });
+    socket.on("close", () => { clearTimeout(clockTimer); room.clients.delete(socket); tellViewers(room); });
     socket.on("message", async data => {
       let msg; try { msg = JSON.parse(data.toString()); } catch { return send(socket, { type: "error", code: "invalid-json" }); }
       if (msg.type === "ping") return send(socket, { type: "pong", t: msg.t, serverMs: Date.now() });
       // Viewer diagnostics: the browser's recent CDN requests, so a CDN ban can be read
       // back from `docker logs` without asking the viewer to open devtools.
       if (msg.type === "netlog") { console.log(`[netlog] ${roomId} ${JSON.stringify(msg.data).slice(0, 4000)}`); return; }
+      // A viewer says whether it can play what the TV has now, naming the session it means.
+      if (msg.type === "status" && role === "viewer") {
+        if (typeof msg.sessionId === "string" && msg.sessionId.length <= 100) { socket.viewerStatus = { sessionId: msg.sessionId, ready: msg.ready === true }; tellViewers(room); }
+        return;
+      }
       if (role !== "tv") return send(socket, { type: "error", code: "viewer-read-only" });
 
       if (msg.type === "clock-pong" && probes.delete(msg.t) && Number.isFinite(msg.tvMs)) {
@@ -293,6 +306,7 @@ export function createRelayServer({ resolve = resolveRedirects, tvScreenshot = c
       room.lastEvent = { sessionId: next.sessionId, sequence: next.sequence };
       const newSession = !prev || prev.sessionId !== next.sessionId || prev.mediaUrl !== next.mediaUrl;
       room.state = next;
+      if (newSession) tellViewers(room);       // (nobody has said they can play this one yet)
       (room.samples ||= []).push([next.sampledAtMs, next.positionSeconds, next.paused ? 1 : 0, next.sequence]); if (room.samples.length > 120) room.samples.shift();
       if (newSession) { room.cdnUrl = null; room.size = null; room.resolveError = null; broadcast(room, { type: "room-state", state: next, cdnUrl: null }); }
       else broadcast(room, { type: "room-state", state: next, cdnUrl: room.cdnUrl, size: room.size, resolveError: room.resolveError, resolveHost: room.resolveHost || null });

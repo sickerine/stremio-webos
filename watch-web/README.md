@@ -28,6 +28,12 @@ LG TV ──(play/pause/seek/position)──► relay ──(WebSocket)──►
 - **The relay** (`server/`): resolves the torrentio → TorBox → CDN redirect chain
   once (the middle hop has no CORS header, so a page can't) and relays TV state.
   Movie streams bypass it; the short comparison clips are served locally.
+- **The room**: the relay tells everyone who is watching (`room-viewers`: one entry
+  a viewer, `{ id, ready }`, also on `hello`). A viewer says whether it can play what
+  the TV has now with `{ type: "status", sessionId, ready }`; `ready` is `null` for a
+  viewer that has not said (the VLC follower does not yet) and `false` for one that
+  last spoke of another session. The TV app (Seimio) draws them and, as something
+  starts, waits for them. That is all a viewer may send besides `ping` and `netlog`.
 
 ## What works (verified against real TorBox streams)
 
@@ -85,6 +91,7 @@ Point the TV bridge at `ws://YOUR_IP:3211/ws`.
 ```sh
 npm test                                    # pure logic (sync, relay, byte source)
 node scripts/tv-sim.mjs                      # a TV simulator (URL=... POS=... PAUSED=1)
+node scripts/viewer-sim.mjs                  # viewers for a real TV (N=3 READY=6000,never WATCH_PASSWORD=...): each says "loading", then "ready"
 node scripts/pw-diag.mjs <url> [s] [chromium|firefox]   # browser diagnostics
 npm run build && node scripts/pw-e2e.mjs    # a real browser follows a fake TV: sound, a skip, a flickering start (needs ffmpeg)
 ```

@@ -324,7 +324,7 @@ video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.
 const relay = connectRelay({
   room,
   build: new URL(import.meta.url).pathname,   // "/assets/index-<hash>.js": changes with every build
-  onConnection: st => ui.setConnection(st),
+  onConnection: st => { ui.setConnection(st); said = null; },      // (a relay just reached has heard nothing from this browser)
   onState: (state, resolveError, resolveHost) => {
     const now = Date.now();
     const sampledAtMs = relay.toLocalMs(state.sampledAtMs);
@@ -358,6 +358,18 @@ const relay = connectRelay({
 });
 ui.setRoom(room === "home" ? "" : `Room ${room}`);
 showIdle();
+
+// Tell the room whether this browser can play what the TV has now: the TV draws who is watching and,
+// as something starts, waits for them. Said when it changes.
+let said = null;
+setInterval(() => {
+  const id = tvState?.sessionId, s = session;
+  if (!id) { said = null; return; }
+  const target = estimateTvPosition(tvState);
+  const ready = Boolean(s && !s.starting && s.id === id && s.pipeline.sourceBuffer && s.pipeline.isBuffered(target) &&
+                        video.readyState >= 3 && Math.abs(video.currentTime - target) < 1);
+  if (said !== `${id} ${ready}`) { said = `${id} ${ready}`; relay.send({ type: "status", sessionId: id, ready }); }
+}, 250);
 
 // Debug/inspection handle (also drives the automated browser tests).
 window.__watch = () => {
