@@ -18,7 +18,7 @@ for (let i = 0; i < n; i++) {
     const m = JSON.parse(d);
     const state = m.type === "hello" || m.type === "room-state" ? m.state : null;
     if (m.type === "room-idle") { session = null; clearTimeout(timer); console.log(`[viewer ${i + 1}] the TV stopped`); }
-    if (!state || state.sessionId === session) { if (state && i === 0 && state.event !== "heartbeat") console.log(`[tv] ${state.event} at ${state.positionSeconds.toFixed(1)} paused=${state.paused}`); return; }
+    if (!state || state.sessionId === session) { if (state && i === 0 && state.event !== "heartbeat") console.log(`[tv] ${state.event} at ${state.positionSeconds.toFixed(2)} paused=${state.paused} loading=${state.buffering}`); return; }
     session = state.sessionId; clearTimeout(timer);
     console.log(`[viewer ${i + 1}] the TV has ${state.title || "something"} at ${state.positionSeconds.toFixed(1)} paused=${state.paused}`);
     say(false);

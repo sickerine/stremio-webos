@@ -60,6 +60,26 @@ test("the TV is told who is watching and who can play what it has", async () => 
   } finally { await s.close(); }
 });
 
+// A viewer that says its status over and over does not have the room told each time.
+test("a flood of statuses is one word to the room", async () => {
+  const s = createRelayServer({ resolve: async url => ({ url, size: 1 }), password: "", tvKey: "" });
+  await s.listen(0, "127.0.0.1");
+  const at = role => `ws://127.0.0.1:${s.address().port}/ws?role=${role}&room=home`;
+  try {
+    const tv = await join(at("tv")), v = await join(at("viewer"));
+    tv.say(state("one", 1));
+    await v.next(m => m.type === "room-state");
+    await new Promise(r => setTimeout(r, 300));
+    const before = tv.got.filter(m => m.type === "room-viewers").length;
+    for (let i = 0; i < 400; i++) v.say({ type: "status", sessionId: "one", ready: i % 2 === 0 });
+    await new Promise(r => setTimeout(r, 500));
+    const told = tv.got.filter(m => m.type === "room-viewers").length - before;
+    assert.ok(told >= 1 && told <= 6, `the room was told ${told} times of 400 statuses`);
+    assert.deepEqual(readies(tv.got.filter(m => m.type === "room-viewers").pop()), [false], "and knows the last of them");
+    tv.ws.terminate(); v.ws.terminate();
+  } finally { await s.close(); }
+});
+
 // A viewer still may not act as the TV.
 test("a viewer's status is all a viewer may say", async () => {
   const s = createRelayServer({ resolve: async url => ({ url, size: 1 }), password: "", tvKey: "" });

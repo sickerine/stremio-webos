@@ -149,7 +149,17 @@ export function createRelayServer({ resolve = resolveRedirects, tvScreenshot = c
   // player from before this message existed), and false for a viewer that last spoke of something else.
   const viewersOf = room => [...room.clients].filter(c => c.watchRole === "viewer").map(c => ({ id: c.viewerId,
     ready: c.viewerStatus ? c.viewerStatus.ready && c.viewerStatus.sessionId === room.state?.sessionId : null }));
-  const tellViewers = room => { const viewers = viewersOf(room), now = JSON.stringify(viewers); if (now !== room.roster) { room.roster = now; broadcast(room, { type: "room-viewers", viewers }); } };
+  // (said a tenth of a second after it changes, and once for whatever changed meanwhile: a viewer that
+  // sent its status over and over had every client in the room told each time)
+  const tellViewers = room => {
+    if (room.rosterTimer) return;
+    room.rosterTimer = setTimeout(() => {
+      room.rosterTimer = null;
+      const viewers = viewersOf(room), now = JSON.stringify(viewers);
+      if (now !== room.roster) { room.roster = now; broadcast(room, { type: "room-viewers", viewers }); }
+    }, 100);
+    room.rosterTimer.unref?.();
+  };
   // The hashed bundle path in dist/index.html identifies this build. It rides on
   // `hello`, so a tab left open across a deploy reloads instead of running old code.
   let build = null;
