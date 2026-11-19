@@ -321,6 +321,9 @@ ui.onSound(() => {
 });
 video.addEventListener("playing", () => { if (!audioUnlocked && video.muted) ui.showSoundPrompt(true); }, { once: true });
 
+// What this browser last told the room about itself (see the report at the end). Declared before the
+// relay is reached: connecting calls onConnection at once, and a `let` further down is not there yet.
+let said = null;
 const relay = connectRelay({
   room,
   build: new URL(import.meta.url).pathname,   // "/assets/index-<hash>.js": changes with every build
@@ -361,7 +364,6 @@ showIdle();
 
 // Tell the room whether this browser can play what the TV has now: the TV draws who is watching and,
 // as something starts, waits for them. Said when it changes.
-let said = null;
 setInterval(() => {
   const id = tvState?.sessionId, s = session;
   if (!id) { said = null; return; }
